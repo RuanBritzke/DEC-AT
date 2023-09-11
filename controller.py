@@ -3,6 +3,10 @@ import os
 from model import *
 from view import *
 
+ALL = 'All'
+SE = 'SE'
+BUS = 'BUS'
+
 class Controller():
     
     view = None
@@ -38,35 +42,60 @@ class Controller():
             self._buses_or_subs = self.model.load_buses
         else:
             self._buses_or_subs = None
-            print("wtf?")
+            print("wtf from 'set_buses_or_subs'")
 
-    def calculate_unavailabilty(self, scope: str|int):
-        if self.view is None:
-            return
-        if scope == 'All':
-            self.view.output.add_table('Indisponibiliades', self.unavailabilty_all())
-        return
-    
-    def unavailabilty_all(self):
-        print('Calculating Unavailabitly')
+    def processingData(self, indexes : list, data : list, sub, buses):
+        visited_failures = set()    
+        for bus in sorted(buses, key= lambda x: self.model.network.nodes[x][VOLTAGE_LEVEL], reverse=True):
+            failureModes = self.model.failure_modes_table(bus)
+            for index, failures, _ in failureModes.itertuples():
+                if failures in visited_failures: continue
+                indexes.append((sub, bus, index))
+                data.append([list(failures)])
+                visited_failures.add(failures)
+        return indexes, data
+
+    def generateFailureTable(self, scope: Literal['ALL', 'SE', 'SUB'], entry: str|int|None = None):
+        
         indexes = list()
-        results  = list()
-        for kw, buses in self.model.load_subs_dict.items():
-            visited_failures = set()
-            for bus in sorted(buses, key= lambda x: self.model.network.nodes[x][VOLTAGE_LEVEL], reverse=True):
-                paths = self.model.paths_from_bus_to_sources(bus)
-                belongingTable = self.model.belonging_table(paths = self.model.paths_from_bus_to_sources(bus))
-                failureModes = self.model.failure_modes_table(belonging_table= belongingTable)
-                for index, failures, _ in failureModes.itertuples():
-                    if failures in visited_failures: continue
-                    indexes.append((kw, bus, index))
-                    results.append([list(failures)])
-                    visited_failures.add(failures)
-        mi = pd.MultiIndex.from_tuples(indexes, names= ['SE', 'BARRA', 'nº'])
-        df = pd.DataFrame(results, index= mi, columns = ['FALHAS'])
+        data  = list()
+        if scope == ALL:
+            for kw, buses in self.model.load_subs_dict.items():
+                indexes, data = self.processingData(indexes, data, kw, buses)
+
+        elif scope == SE:
+            buses = self.model.load_subs_dict[entry]
+            indexes, data = self.processingData(indexes, data, entry, buses)
+
+        elif scope == BUS:
+            
+            sub = self.model.network.nodes[entry][SUB]
+            indexes, data = self.processingData(indexes, data, sub, [entry])
+        
+        mi = pd.MultiIndex.from_tuples(indexes, names= ['SE', 'BARRA', 'N'])
+        df = pd.DataFrame(data, index= mi, columns = ['FALHAS'])
         maxFailureLen = df['FALHAS'].apply(len).max()
+
         for i in range(maxFailureLen):
             df[f'FALHA_{i+1}'] = df['FALHAS'].apply(lambda x: x[i] if len(x) > i else None)
         df.drop(columns='FALHAS', inplace=True)
-        print('Done')  
-        return df
+
+        flatDf = df.reset_index()
+        return flatDf
+    
+    def computeUnavailabilty(self, entry: str|None = None):
+        if entry is None:
+            entry = 'Todas SEs'
+            table = self.generateFailureTable(scope=ALL)
+        elif entry.isalpha():
+            table = self.generateFailureTable(scope=SE, entry=entry)
+        elif entry.isnumeric():
+            table = self.generateFailureTable(scope=BUS, entry=int(entry))
+
+        for row in table.itertuples():
+            index, se, bus, n = row[0:4]
+            failures = row[4:]
+            table.at[index, 'Indisponibilidade'] = self.model.computeUnavailabilty(failures)
+
+        self.view.output.add_table(f'{entry}', table)
+

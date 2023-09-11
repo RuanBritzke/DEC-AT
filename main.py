@@ -1,9 +1,11 @@
 import tkinter as tk
-
+import warnings
 
 from model import Model
 from view import View
 from controller import Controller
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class App(tk.Tk):
     

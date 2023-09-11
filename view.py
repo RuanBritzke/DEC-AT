@@ -1,10 +1,24 @@
-from typing import Literal
-
-from tkinter import ttk
 import tkinter as tk
 import tkinter.filedialog
-import pandastable as pdt
+from tkinter import ttk
+from tkinter import messagebox
 import pandas as pd
+import pandastable as pdt
+
+from typing import Literal
+
+pd.options.mode.chained_assignment = None  # default='warn'
+
+class Message(tk.Toplevel):
+    
+    def __init__(self, message):
+        super(Message, self).__init__()
+        self.title('Carregando')
+        tk.Message(self, text= message, padx=20, pady=20).pack()
+
+    def close(self):
+        self.destroy()
+
 
 
 class StatusBar(tk.Frame):
@@ -23,7 +37,8 @@ class StatusBar(tk.Frame):
 
 class IND(tk.Frame):
 
-    def __init__(self, master, controller, **kwargs):
+    def __init__(self, root, master, controller, **kwargs):
+        self.root = root
         self.master = master
         self.controller = controller
         super().__init__(master, **kwargs)
@@ -31,14 +46,16 @@ class IND(tk.Frame):
         self.title.pack(padx=5,fill='x', expand=True, anchor='w')
         
         self.calculate = tk.Button(self, text = 'Calcular', state='disabled')
-        self.calculate.bind('<ButtonRelease-1>', self.select)
+        self.calculate.bind('<ButtonRelease-1>', self.startSearch)
         self.calculate.pack(padx=5, fill='x', expand=True, anchor='w')
         
         self.pack(anchor='nw')
         ttk.Separator(master).pack(pady=5, fill='x', anchor='n')
     
-    def select(self, *args):
-        self.controller.calculate_unavailabilty(scope= 'All')
+    def startSearch(self, *args):
+        self.root.status_bar.set('Calculando Indisponibilidade para todas as SEs')
+        self.controller.computeUnavailabilty()
+        self.root.status_bar.set('Pronto!')
         return
 
     def enable(self, _state='normal'):
@@ -53,7 +70,8 @@ class IND(tk.Frame):
         self.enable('disable')
 
 class DEC(tk.Frame):
-    def __init__(self, master, controller, **kwargs):
+    def __init__(self, root, master, controller, **kwargs):
+        self.root = root
         self.master = master
         self.controller = controller
         super().__init__(master,  **kwargs)
@@ -63,6 +81,11 @@ class DEC(tk.Frame):
         self.pack(anchor='nw')
         ttk.Separator(master).pack(pady=5, fill='x', anchor='n')
 
+    def startSearch(self, *args):
+        self.root.status_bar.set(f'Calculando Indisponibilidade para {self.cbox.get()}')
+        self.controller.computeUnavailabilty(entry = self.cbox.get())
+        self.root.status_bar.set('Pronto!')
+        
     def search_box(self):
         root = tk.Frame(self)
         self.vars = tk.StringVar()
@@ -79,6 +102,7 @@ class DEC(tk.Frame):
             state='disabled')
         self.search.grid(row=0, column=1, padx=5, pady=5)
         root.pack(fill='x', expand=True)
+        self.search.bind('<ButtonRelease-1>', self.startSearch)
 
 
     def creaete_funcsel_btns(self):
@@ -244,7 +268,7 @@ class OutputNotebook:
         self.add_table('Tabela 1')
         self.add_table('Tabela 2')
 
-    def add_table(self, title,df: None | pd.DataFrame = None):
+    def add_table(self, title, df: None | pd.DataFrame = None):
         ntab = tk.Frame(self.notebook)
         self.notebook.add(ntab, text=title)
         tableWindow = tk.Frame(ntab)
@@ -264,8 +288,7 @@ class OutputNotebook:
         elif df.empty:
             return
         else:
-            flatDf = df.reset_index()
-            model = pdt.TableModel(flatDf)
+            model = pdt.TableModel(df)
             self.table = pdt.Table(tableWindow, model=model, showtoolbar=True, showstatusbar=True)
             self.table.show()
         tableWindow.pack(anchor='n', fill='both', expand=True)
@@ -285,8 +308,8 @@ class View:
         self.options = tk.LabelFrame(self.master, text = 'Opções:')
         self.options.pack(side='left', fill='y', anchor='w')
 
-        self.ind = IND(self.options, self.controller)
-        self.dec = DEC(self.options, self.controller)
+        self.ind = IND(self, self.options, self.controller)
+        self.dec = DEC(self, self.options, self.controller)
         ###
 
         self.output = OutputNotebook(self.master)

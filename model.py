@@ -4,11 +4,12 @@ import networkx as nx
 import os
 import pandas as pd
 import signal
+
 pd.options.mode.chained_assignment = None  # default='warn'
 
 from contextlib import contextmanager
 from io import StringIO
-from typing import Literal, Iterable
+from typing import Literal, Iterable, Optional
 from collections import defaultdict
 from itertools import combinations
 from functools import cached_property
@@ -328,7 +329,9 @@ class Model:
                 stack.pop()
                 visited.pop()
 
-    def belonging_table(self, bus=None,*, paths) -> pd.DataFrame:
+    def belonging_table(self, bus: int | None = None,*, paths: list | None = None) -> pd.DataFrame:
+        if bus is None and paths is None:
+            raise ValueError("Bus and Paths can't be None at the same time!")
         if paths is None:
             paths = self.paths_from_bus_to_sources(bus)
 
@@ -372,14 +375,14 @@ class Model:
             
         return failures
 
-
-    def unavailability(self, failure) -> tuple[FailureRates, Times]:
-        order = len(failure)
-
-        permanent_failure_rate = prod([self.network[fail][PERMANENT_FAILURE_RATE] for fail in failure])
-        temporary_failure_rate = prod([self.network[fail][TEMPORARY_FAILURE_RATE] for fail in failure])
-        replacement_time =       prod([self.network.edges[fail][REPLACEMENT_TIME] for fail in failure])
-        repair_time =            prod([self.network.edges[fail][REPAIR_TIME] for fail in failure])
+    def computeUnavailabiltyValues(self, failures : Iterable) -> tuple[FailureRates, Times]:
+        failures = [fail for fail in failures if fail is not None]
+        order = len(failures)
+        
+        permanent_failure_rate = prod([self.network.edges[fail][PERMANENT_FAILURE_RATE] for fail in failures])
+        temporary_failure_rate = prod([self.network.edges[fail][TEMPORARY_FAILURE_RATE] for fail in failures])
+        replacement_time =       prod([self.network.edges[fail][REPLACEMENT_TIME] for fail in failures])
+        repair_time =            prod([self.network.edges[fail][REPAIR_TIME] for fail in failures])  
 
         failure_rates = (permanent_failure_rate, temporary_failure_rate)
         repair_times = (replacement_time, repair_time)
@@ -387,6 +390,9 @@ class Model:
         unavailability = ((permanent_failure_rate*replacement_time + temporary_failure_rate+repair_time) + (permanent_failure_rate*temporary_failure_rate))/(8760**(order-1))
 
         return (unavailability, failure_rates, repair_times)
+
+    def computeUnavailabilty(self, failures) -> float:
+        return self.computeUnavailabiltyValues(failures)[0]
 
     def compute_saidi(
             self,

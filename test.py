@@ -2,44 +2,26 @@ from model import *
 from tqdm import tqdm
 
 model = Model()
-model.create_net("CASO_BASE.PWF")
-model.max_order = 2
-model.pathCutOff = 200
+model.create_net("C:\\Users\\09909909901\\Downloads\\CASO OPERAÇÃO 2023.PWF")
+model.max_order = math.inf
 results = dict()
 
 indexes = list()
 results  = list()
-kw = 'CPA'
-buses = model.load_subs_dict[kw]
-visited_failures = set()
-pathString = ""
-
-for bus in sorted(buses, key= lambda x: model.network.nodes[x][VOLTAGE_LEVEL], reverse=True):
-    paths = model.paths_from_bus_to_sources(bus)
-    for path in paths:
-        pathString = pathString + ", ".join([str(x) for x in path]) + '\n'
-    belongingTable = model.belonging_table(paths = model.paths_from_bus_to_sources(bus))
-    print(belongingTable)
-    failureModes = model.failure_modes_table(belonging_table= belongingTable)
-    for index, failures, _ in failureModes.itertuples():
-        if failures in visited_failures: continue
-        indexes.append((kw, bus, index))
-        results.append([list(failures)])
-        visited_failures.add(failures)
-
-
-with open('paths.txt', 'w') as file:
-    file.write(pathString)
+for kw, buses in model.load_subs_dict.items():
+    visited_failures = set()
+    for bus in sorted(buses, key= lambda x: model.network.nodes[x][VOLTAGE_LEVEL], reverse=True):
+        print(f'Calculando {kw} - {bus}', end = '\r')
+        paths = model.paths_from_bus_to_sources(bus)
+        belongingTable = model.belonging_table(paths = model.paths_from_bus_to_sources(bus))
+        failureModes = model.failure_modes_table(belonging_table= belongingTable)
+        print( '                       ', end = '\r')
+        for index, failures, order in failureModes.itertuples():
+            if failures in visited_failures: continue
+            indexes.append((kw, bus, index))
+            results.append([list(failures), order])
+            visited_failures.add(failures)
 
 mi = pd.MultiIndex.from_tuples(indexes, names= ['SE', 'BARRA', 'INDEX'])
-test = pd.DataFrame(results, index= mi, columns = ['FALHAS'])
-
-maxFailureLen = test['FALHAS'].apply(len).max()
-
-for i in range(maxFailureLen):
-    test[f'FALHA_{i+1}'] = test['FALHAS'].apply(lambda x: x[i] if len(x) > i else None)
-
-test.drop(columns='FALHAS', inplace=True)
-
-
+test = pd.DataFrame(results, index= mi, columns = ['Falhas', ORDER])
 print(test)
