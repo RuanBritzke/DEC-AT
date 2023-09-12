@@ -1,7 +1,7 @@
 import os
 
 from model import *
-from view import *
+from view import View
 
 ALL = 'All'
 SE = 'SE'
@@ -13,11 +13,12 @@ class Controller():
     
     _buses_or_subs = None
 
-    def __init__(self, model : Model):
+    def __init__(self, model : Model, view : View):
         self.model = model
-    
-    def set_view(self, view):
         self.view = view
+
+        self.view.set_controller(self)
+    
 
     def import_file(self):
             file = self.view.askfilewindow()
@@ -95,7 +96,7 @@ class Controller():
         for row in table.itertuples():
             index, se, bus, n = row[0:4]
             failures = row[4:]
-            table.at[index, 'Indisponibilidade'] = self.model.computeUnavailabilty(failures)
+            table.at[index, 'IND'] = self.model.computeUnavailabilty(failures)
 
         self.view.output.add_table(f'{entry}', table)
 

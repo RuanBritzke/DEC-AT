@@ -7,6 +7,7 @@ import pandastable as pdt
 
 from typing import Literal
 
+
 pd.options.mode.chained_assignment = None  # default='warn'
 
 class Message(tk.Toplevel):
@@ -135,6 +136,80 @@ class DEC(tk.Frame):
         values = self.controller.buses_or_subs
         self.cbox['values'] = values
 
+class ParameterInputFrame(tk.Frame):
+
+    def __init__(self, master, dataframe, pandastable, **kwargs):
+        super().__init__(master, **kwargs)
+        self.dataframe = dataframe
+        self.pandastable = pandastable
+
+    def forget(self) -> None:
+        for widget in self.winfo_children():
+            widget.grid_forget()
+
+class OutputNotebook:
+    def __init__(self, master : 'View', controller, **kwargs):
+        self.master = master
+        self.controller = controller
+        self.notebook = CustomNotebook(master)
+        self.notebook.pack(pady=(8,0), anchor='ne', fill='both', expand=True)
+        self.add_table('Exemplo')
+
+    def add_table(self, title, df: pd.DataFrame | None = None):
+        ntab = tk.Frame(self.notebook)
+        tableWindow = tk.Frame(ntab)
+        
+        if df is None:
+            ntabLabel = tk.Label(ntab, text="Seus outputs serão gerados aqui!", justify='left')
+            ntabLabel.pack(anchor='n', fill='x', expand=True)
+        elif df.empty:
+            return
+        else:
+            df_visualization = df.copy()
+            model = pdt.TableModel(df_visualization)
+            self.table = pdt.Table(tableWindow, model=model, showtoolbar=True, showstatusbar=True)
+            self.table.show()
+            tableWindow.pack(anchor='n', fill='both', expand=True)
+            ttk.Separator(ntab).pack(pady=5, fill='x', anchor='n')
+            inputsw = ParameterInputFrame(ntab, df, self.table)
+            inputsw.pack(anchor='s', fill='both', expand=True)
+        self.notebook.add(ntab, text=title)
+        self.notebook.select(ntab)
+        return
+
+class View:
+
+    def __init__(self, master : tk.Tk):
+        self.master = master
+        self.status_bar = StatusBar(self.master, bg='white')
+        self.options = tk.LabelFrame(self.master, text = 'Opções:')
+        self.options.pack(side='left', fill='y', anchor='w')
+        self.status_bar.set('Importe uma rede!')
+
+    def set_controller(self, controller):
+        self.controller = controller
+        self.my__post__init__()
+
+    def my__post__init__(self):
+        self.create_menu() 
+        self.ind = IND(self, self.options, self.controller)
+        self.dec = DEC(self, self.options, self.controller)
+        self.output = OutputNotebook(self.master, self.controller)
+
+    def create_menu(self):
+        menubar = tk.Menu(self.master, tearoff=False)
+        self.master.config(menu = menubar)
+        menubar.add_command(
+            label= 'Importar',
+            command= self.controller.import_file,
+        )
+
+    def askfilewindow(self):
+        return tkinter.filedialog.askopenfilename(
+            defaultextension= ".PWF", 
+            filetypes=[('All files', '*'), ('Arquivo Texto do Anarede', '.PWF')]
+        )
+
 class CustomNotebook(ttk.Notebook):
     """A ttk Notebook with close buttons on each tab"""
 
@@ -227,128 +302,3 @@ class CustomNotebook(ttk.Notebook):
             ]
         })
     ])
-
-class ParmeterInputFrame(tk.Frame):
-
-    def __init__(self, master, **kwargs):
-        super().__init__(master, **kwargs)
-        self.sel_failure()
-        self.populate(1)
-
-    def sel_failure(self):
-        root = tk.Frame(self)
-
-        label = tk.Label(root, text='Selecione a Falha:')
-        label.grid(row=0, column=0)
-
-        self.vars = tk.StringVar()
-        self.cbox = ttk.Combobox(
-            root,
-            state='disabled',
-            textvariable=self.vars,
-            values=None)
-        self.cbox.grid(row=0, column=1)
-        
-        root.pack()
-
-
-    def populate(self, order: Literal['1', '2']):
-        if order == '1':
-            pass
-        elif order == '2':
-            pass
-
-    def forget(self) -> None:
-        for widget in self.winfo_children():
-            widget.grid_forget()
-
-class OutputNotebook:
-    def __init__(self, master, **kwargs):
-        self.notebook = CustomNotebook(master)
-        self.add_table('Tabela 1')
-        self.add_table('Tabela 2')
-
-    def add_table(self, title, df: None | pd.DataFrame = None):
-        ntab = tk.Frame(self.notebook)
-        self.notebook.add(ntab, text=title)
-        tableWindow = tk.Frame(ntab)
-        inputsw = ParmeterInputFrame(ntab)
-        if df is None:
-            rows = 100
-            cols = 26
-            empty_data = [["" for _ in range(cols)] for _ in range(rows)]
-            self.table = pdt.Table(
-                tableWindow,
-                rows=rows,
-                cols=cols,
-                data=empty_data, 
-                showtoolbar=False, 
-                showstatusbar=False)
-            self.table.show()
-        elif df.empty:
-            return
-        else:
-            model = pdt.TableModel(df)
-            self.table = pdt.Table(tableWindow, model=model, showtoolbar=True, showstatusbar=True)
-            self.table.show()
-        tableWindow.pack(anchor='n', fill='both', expand=True)
-        ttk.Separator(ntab).pack(pady=5, fill='x', anchor='n')
-        inputsw.pack(anchor='s', fill='both', expand=True)
-        self.notebook.pack(pady=(8,0), anchor='ne', fill='both', expand=True)
-
-class View:
-
-    def __init__(self, master : tk.Tk, controller):
-        self.master = master
-        # self.master.config(background='black')
-        self.controller = controller
-        self.create_menu() 
-        self.status_bar = StatusBar(self.master, bg='white')
-        ###
-        self.options = tk.LabelFrame(self.master, text = 'Opções:')
-        self.options.pack(side='left', fill='y', anchor='w')
-
-        self.ind = IND(self, self.options, self.controller)
-        self.dec = DEC(self, self.options, self.controller)
-        ###
-
-        self.output = OutputNotebook(self.master)
-
-        self.status_bar.set('Importe uma rede!')
-        
-
-    # Menu itens -----------------
-    def create_menu(self):
-        menubar = tk.Menu(self.master, tearoff=False)
-        self.master.config(menu = menubar)
-
-        menubar.add_cascade(
-            label='Arquivo',
-            menu=self.create_file_menu(menubar),
-        )
-
-        menubar.add_command(
-            label= 'Importar',
-            command= self.controller.import_file,
-        )
-        # self.master.bind_all('<Control-i>', self.controller.import_file)
-
-    def create_file_menu(self, menubar : tk.Menu):
-        file_menu = tk.Menu(menubar, tearoff=False)
-        
-        file_menu.add_command(label='Novo')
-        file_menu.add_command(label='Abrir')
-        file_menu.add_command(label='Salvar')
-        file_menu.add_command(
-            label='Fechar',
-            command=self.master.destroy,
-        )
-        file_menu.add_separator()
-        file_menu.add_command(label='Opções')
-        return file_menu
-
-    def askfilewindow(self):
-        return tkinter.filedialog.askopenfilename(
-            defaultextension= ".PWF", 
-            filetypes=[('All files', '*'), ('Arquivo Texto do Anarede', '.PWF')]
-        )

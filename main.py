@@ -12,15 +12,14 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
 
+        self.geometry("500x350")
         self.state('iconic')
         self.title("DEC-AT")    
 
-        # Creating a Model
         model = Model()
-        controller = Controller(model)
-        view = View(self, controller)
+        view = View(self)
+        controller = Controller(model, view)
         model.set_observer(view)
-        controller.set_view(view)
 
 
 if __name__ == "__main__":
