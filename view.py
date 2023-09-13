@@ -36,27 +36,116 @@ class StatusBar(tk.Frame):
     def clear(self):
         self.label.config(text='')
 
-class IND(tk.Frame):
+# Useless
+# class IND(tk.Frame):
+
+#     def __init__(self, root, master, controller, **kwargs):
+#         self.root = root
+#         self.master = master
+#         self.controller = controller
+#         super().__init__(master, **kwargs)
+#         self.title = tk.Label(self, text='Indisponibilidade [h/Ano]', justify='left')
+#         self.title.pack(padx=5,fill='x', expand=True, anchor='w')
+        
+#         self.calculate = tk.Button(self, text = 'Calcular', state='disabled')
+#         self.calculate.bind('<ButtonRelease-1>', self.startSearch)
+#         self.calculate.pack(padx=5, fill='x', expand=True, anchor='w')
+        
+#         self.pack(anchor='nw')
+#         ttk.Separator(master).pack(pady=5, fill='x', anchor='n')
+    
+#     def startSearch(self, *args):
+#         return
+
+#     def enable(self, _state='normal'):
+#         def set_state(widget:tk.Widget):
+#             for ch in widget.winfo_children():
+#                 set_state(ch)
+#             if 'state' in  widget.keys():
+#                 widget.config(state = _state)
+#         set_state(self)
+
+#     def disable(self):
+#         self.enable('disable')
+
+class DEC(tk.Frame):
+    
+    cbox_values = None
 
     def __init__(self, root, master, controller, **kwargs):
         self.root = root
         self.master = master
         self.controller = controller
-        super().__init__(master, **kwargs)
-        self.title = tk.Label(self, text='Indisponibilidade [h/Ano]', justify='left')
-        self.title.pack(padx=5,fill='x', expand=True, anchor='w')
-        
-        self.calculate = tk.Button(self, text = 'Calcular', state='disabled')
-        self.calculate.bind('<ButtonRelease-1>', self.startSearch)
-        self.calculate.pack(padx=5, fill='x', expand=True, anchor='w')
-        
+        super().__init__(master,  **kwargs)
+        tk.Label(self, text='Calcular DEC:').pack(anchor='nw')
+        self.creaete_funcsel_btns()
+        self.search_box()
         self.pack(anchor='nw')
         ttk.Separator(master).pack(pady=5, fill='x', anchor='n')
-    
+
     def startSearch(self, *args):
-        self.root.status_bar.set('Calculando Indisponibilidade para todas as SEs')
-        self.controller.computeUnavailabilty()
+
+        print(self.cbox.get(), type(self.cbox.get()))
+
+        self.root.status_bar.set(f'Calculando Indisponibilidade para {self.cbox.get()}')
+        self.controller.computeUnavailabilty(entry = self.cbox.get())
         self.root.status_bar.set('Pronto!')
+        
+    def search_box(self):
+        root = tk.Frame(self)
+        self.vars = tk.StringVar()
+        self.cbox = ttk.Combobox(
+            root,
+            state='disabled',
+            textvariable=self.vars,
+            postcommand= self.update_cblist)
+        self.cbox.grid(row=0, column=0, padx=5, pady=5)
+        self.search = tk.Button(
+            root, 
+            text="Procurar", 
+            state='disabled')
+        self.search.grid(row=0, column=1, padx=5, pady=5)
+        root.pack(fill='x', expand=True)
+        self.search.bind('<ButtonRelease-1>', self.startSearch)
+
+
+    def creaete_funcsel_btns(self):
+        labels = ["Todas SEs", "Por SE", "Por BARRA"]
+        options = list(range(len(labels)))
+        self.var = tk.IntVar()
+        self.var.set(0)
+        for i, label in enumerate(labels):
+            radio_btn = tk.Radiobutton(
+                self,
+                text=label,
+                state= 'disabled',
+                variable= self.var,
+                value = i,
+                command= lambda: self.radio_button_selection(self.var.get()))
+            radio_btn.pack(anchor='nw')
+
+    def radio_button_selection(self, option: int):
+        print('Hello from radio button selection', option, type(option))
+        if option == 0:
+            print("option 1")
+            self.cbox.config(state= 'disabled')
+            self.cbox_values = 'Todas SEs'
+            print(self.cbox_values)
+            self.cbox.set('Todas SEs')
+        if option == 1:
+            print("option 2")
+            self.cbox.config(state= 'normal')
+            self.cbox_values = self.controller.get_cbox_values(to = 'SUB')
+            print(self.cbox)
+            self.cbox.set(self.cbox_values[0])
+        elif option == 2:
+            print("option 3")
+            self.cbox.config(state= 'normal')
+            self.cbox_values = self.controller.get_cbox_values(to = 'BUS')
+            print(self.cbox)
+            self.cbox.set(self.cbox_values[0])
+        else:
+            return
         return
 
     def enable(self, _state='normal'):
@@ -70,71 +159,9 @@ class IND(tk.Frame):
     def disable(self):
         self.enable('disable')
 
-class DEC(tk.Frame):
-    def __init__(self, root, master, controller, **kwargs):
-        self.root = root
-        self.master = master
-        self.controller = controller
-        super().__init__(master,  **kwargs)
-        tk.Label(self, text='Calcular DEC:').pack(anchor='nw')
-        self.creaete_funcsel_btns()
-        self.search_box()
-        self.pack(anchor='nw')
-        ttk.Separator(master).pack(pady=5, fill='x', anchor='n')
-
-    def startSearch(self, *args):
-        self.root.status_bar.set(f'Calculando Indisponibilidade para {self.cbox.get()}')
-        self.controller.computeUnavailabilty(entry = self.cbox.get())
-        self.root.status_bar.set('Pronto!')
-        
-    def search_box(self):
-        root = tk.Frame(self)
-        self.vars = tk.StringVar()
-        self.cbox = ttk.Combobox(
-            root,
-            state='disabled',
-            textvariable=self.vars,
-            values=None, 
-            postcommand= self.updtcblist)
-        self.cbox.grid(row=0, column=0, padx=5, pady=5)
-        self.search = tk.Button(
-            root, 
-            text="Procurar", 
-            state='disabled')
-        self.search.grid(row=0, column=1, padx=5, pady=5)
-        root.pack(fill='x', expand=True)
-        self.search.bind('<ButtonRelease-1>', self.startSearch)
-
-
-    def creaete_funcsel_btns(self):
-        labels = ["Por SE", "Por BARRA"]
-        options = list(range(len(labels)))
-        self.var = tk.StringVar()
-        self.var.set(None)
-        for i, (label, option) in enumerate(zip(labels, options)):
-            radio_btn = tk.Radiobutton(
-                self,
-                text=label,
-                state= 'disabled',
-                variable= self.var,
-                value= option,
-                command= lambda:self.controller.set_buses_or_subs(self.var.get()))
-            radio_btn.pack(anchor='nw')
-
-    def enable(self, _state='normal'):
-        def set_state(widget:tk.Widget):
-            for ch in widget.winfo_children():
-                set_state(ch)
-            if 'state' in  widget.keys():
-                widget.config(state = _state)
-        set_state(self)
-
-    def disable(self):
-        self.enable('disable')
-
-    def updtcblist(self):
-        values = self.controller.buses_or_subs
-        self.cbox['values'] = values
+    def update_cblist(self):
+        print(self.cbox_values)
+        self.cbox['values'] = self.cbox_values
 
 class ParameterInputFrame(tk.Frame):
 
@@ -155,24 +182,37 @@ class OutputNotebook:
         self.notebook.pack(pady=(8,0), anchor='ne', fill='both', expand=True)
         self.add_table('Exemplo')
 
-    def add_table(self, title, df: pd.DataFrame | None = None):
+    def add_table(self, title : str, view_table: pd.DataFrame | None = None, df: pd.DataFrame | None = None):
+        """ ## Parameters:
+        title: str
+            Titulo da nova janela a ser apresentada
+
+        table: pd.DataFrame | None
+            Tabela a ser apresentada pelo programa
+
+        df: pd.Dataframe | None
+            Tabela original de dados. (Será testado se ainda é necessário)
+        """
+
         ntab = tk.Frame(self.notebook)
         tableWindow = tk.Frame(ntab)
         
         if df is None:
-            ntabLabel = tk.Label(ntab, text="Seus outputs serão gerados aqui!", justify='left')
+            ntabLabel = tk.Label(ntab,
+                                text="Seus outputs serão gerados aqui!",
+                                justify='left')
             ntabLabel.pack(anchor='n', fill='x', expand=True)
         elif df.empty:
             return
         else:
-            df_visualization = df.copy()
-            model = pdt.TableModel(df_visualization)
+            model = pdt.TableModel(view_table)
             self.table = pdt.Table(tableWindow, model=model, showtoolbar=True, showstatusbar=True)
             self.table.show()
             tableWindow.pack(anchor='n', fill='both', expand=True)
             ttk.Separator(ntab).pack(pady=5, fill='x', anchor='n')
             inputsw = ParameterInputFrame(ntab, df, self.table)
             inputsw.pack(anchor='s', fill='both', expand=True)
+
         self.notebook.add(ntab, text=title)
         self.notebook.select(ntab)
         return
@@ -192,7 +232,6 @@ class View:
 
     def my__post__init__(self):
         self.create_menu() 
-        self.ind = IND(self, self.options, self.controller)
         self.dec = DEC(self, self.options, self.controller)
         self.output = OutputNotebook(self.master, self.controller)
 

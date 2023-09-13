@@ -1,3 +1,5 @@
+"""Ao futuro Engenheiro/Estagiario que for manter/refatorar este programa: Minhas sinceras desculpas """
+
 import tkinter as tk
 import warnings
 

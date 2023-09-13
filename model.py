@@ -220,6 +220,9 @@ class Model:
         
         return (len(self.network.nodes), len(self.network.edges))
 
+    def get_edge_name(self, edge):
+        return self.network.edges[edge][NAME]
+            
     @cached_property
     def source_buses(self):
         sources = set()
@@ -391,7 +394,7 @@ class Model:
 
         return (unavailability, failure_rates, repair_times)
 
-    def computeUnavailabilty(self, failures) -> float:
+    def unavailabilty(self, failures) -> float:
         return self.computeUnavailabiltyValues(failures)[0]
 
     def compute_saidi(

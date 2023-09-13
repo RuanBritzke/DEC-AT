@@ -10,8 +10,6 @@ BUS = 'BUS'
 class Controller():
     
     view = None
-    
-    _buses_or_subs = None
 
     def __init__(self, model : Model, view : View):
         self.model = model
@@ -29,21 +27,15 @@ class Controller():
                 self.view.status_bar.set(f'Importando aquivo de: "{file}"')
                 buses, lines = self.model.create_net(file)
                 self.view.status_bar.set(f'Rede importada: {buses} Barras e {lines} conexões!')
-                self.view.ind.enable()
                 self.view.dec.enable()
-
-    @property
-    def buses_or_subs(self):
-        return self._buses_or_subs
     
-    def set_buses_or_subs(self, option):
-        if option=='0':
-            self._buses_or_subs = self.model.load_subs
-        elif option=='1':
-            self._buses_or_subs = self.model.load_buses
+    def get_cbox_values(self, to : Literal['SUB', 'BUS']):
+        if to == SUB:
+            return sorted(self.model.load_subs)
+        elif to == BUS:
+            return sorted(self.model.load_buses)
         else:
-            self._buses_or_subs = None
-            print("wtf from 'set_buses_or_subs'")
+            return None
 
     def processingData(self, indexes : list, data : list, sub, buses):
         visited_failures = set()    
@@ -87,16 +79,26 @@ class Controller():
     def computeUnavailabilty(self, entry: str|None = None):
         if entry is None:
             entry = 'Todas SEs'
-            table = self.generateFailureTable(scope=ALL)
+            df = self.generateFailureTable(scope=ALL)
         elif entry.isalpha():
-            table = self.generateFailureTable(scope=SE, entry=entry)
+            df = self.generateFailureTable(scope=SE, entry=entry)
         elif entry.isnumeric():
-            table = self.generateFailureTable(scope=BUS, entry=int(entry))
+            df = self.generateFailureTable(scope=BUS, entry=int(entry))
 
-        for row in table.itertuples():
+        for row in df.itertuples():
             index, se, bus, n = row[0:4]
             failures = row[4:]
-            table.at[index, 'IND'] = self.model.computeUnavailabilty(failures)
+            df.at[index, 'ORDEM'] = len(failures) # TODO: Not working as intended!
+            df.at[index, 'IND'] = self.model.unavailabilty(failures)
 
-        self.view.output.add_table(f'{entry}', table)
+        self.view.output.add_table(title= f'{entry}', view_table = self.view_table(df), df = df)
+        
 
+    def view_table(self, df : pd.DataFrame):
+        view_table = df.copy()
+        view_table['N'] = view_table['N'] + 1
+        
+        for col in df.columns[3:-2]: # iterate over all failure columns
+            view_table[col] = view_table[col].map(self.model.get_edge_name, na_action= 'ignore')
+            
+        return view_table
