@@ -1,7 +1,6 @@
 import tkinter as tk
 import tkinter.filedialog
 from tkinter import ttk
-from tkinter import messagebox
 import pandas as pd
 import pandastable as pdt
 
@@ -10,16 +9,10 @@ from typing import Literal
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
-class Message(tk.Toplevel):
-    
-    def __init__(self, message):
-        super(Message, self).__init__()
-        self.title('Carregando')
-        tk.Message(self, text= message, padx=20, pady=20).pack()
+class MyTable(pdt.Table):
 
-    def close(self):
-        self.destroy()
-
+    def __init__(self, **kwargs):
+        pass
 
 
 class StatusBar(tk.Frame):
@@ -36,38 +29,6 @@ class StatusBar(tk.Frame):
     def clear(self):
         self.label.config(text='')
 
-# Useless
-# class IND(tk.Frame):
-
-#     def __init__(self, root, master, controller, **kwargs):
-#         self.root = root
-#         self.master = master
-#         self.controller = controller
-#         super().__init__(master, **kwargs)
-#         self.title = tk.Label(self, text='Indisponibilidade [h/Ano]', justify='left')
-#         self.title.pack(padx=5,fill='x', expand=True, anchor='w')
-        
-#         self.calculate = tk.Button(self, text = 'Calcular', state='disabled')
-#         self.calculate.bind('<ButtonRelease-1>', self.startSearch)
-#         self.calculate.pack(padx=5, fill='x', expand=True, anchor='w')
-        
-#         self.pack(anchor='nw')
-#         ttk.Separator(master).pack(pady=5, fill='x', anchor='n')
-    
-#     def startSearch(self, *args):
-#         return
-
-#     def enable(self, _state='normal'):
-#         def set_state(widget:tk.Widget):
-#             for ch in widget.winfo_children():
-#                 set_state(ch)
-#             if 'state' in  widget.keys():
-#                 widget.config(state = _state)
-#         set_state(self)
-
-#     def disable(self):
-#         self.enable('disable')
-
 class DEC(tk.Frame):
     
     cbox_values = None
@@ -78,19 +39,16 @@ class DEC(tk.Frame):
         self.controller = controller
         super().__init__(master,  **kwargs)
         tk.Label(self, text='Calcular DEC:').pack(anchor='nw')
-        self.creaete_funcsel_btns()
+        self.create_function_selection_buttons()
         self.search_box()
         self.pack(anchor='nw')
         ttk.Separator(master).pack(pady=5, fill='x', anchor='n')
 
     def startSearch(self, *args):
-
-        print(self.cbox.get(), type(self.cbox.get()))
-
         self.root.status_bar.set(f'Calculando Indisponibilidade para {self.cbox.get()}')
         self.controller.computeUnavailabilty(entry = self.cbox.get())
         self.root.status_bar.set('Pronto!')
-        
+
     def search_box(self):
         root = tk.Frame(self)
         self.vars = tk.StringVar()
@@ -108,10 +66,8 @@ class DEC(tk.Frame):
         root.pack(fill='x', expand=True)
         self.search.bind('<ButtonRelease-1>', self.startSearch)
 
-
-    def creaete_funcsel_btns(self):
+    def create_function_selection_buttons(self):
         labels = ["Todas SEs", "Por SE", "Por BARRA"]
-        options = list(range(len(labels)))
         self.var = tk.IntVar()
         self.var.set(0)
         for i, label in enumerate(labels):
@@ -125,28 +81,18 @@ class DEC(tk.Frame):
             radio_btn.pack(anchor='nw')
 
     def radio_button_selection(self, option: int):
-        print('Hello from radio button selection', option, type(option))
         if option == 0:
-            print("option 1")
             self.cbox.config(state= 'disabled')
             self.cbox_values = 'Todas SEs'
-            print(self.cbox_values)
             self.cbox.set('Todas SEs')
         if option == 1:
-            print("option 2")
             self.cbox.config(state= 'normal')
-            self.cbox_values = self.controller.get_cbox_values(to = 'SUB')
-            print(self.cbox)
+            self.cbox_values = self.controller.get_options_cbox_values(to = 'SUB')
             self.cbox.set(self.cbox_values[0])
         elif option == 2:
-            print("option 3")
             self.cbox.config(state= 'normal')
-            self.cbox_values = self.controller.get_cbox_values(to = 'BUS')
-            print(self.cbox)
+            self.cbox_values = self.controller.get_options_cbox_values(to = 'BUS')
             self.cbox.set(self.cbox_values[0])
-        else:
-            return
-        return
 
     def enable(self, _state='normal'):
         def set_state(widget:tk.Widget):
@@ -160,21 +106,71 @@ class DEC(tk.Frame):
         self.enable('disable')
 
     def update_cblist(self):
-        print(self.cbox_values)
         self.cbox['values'] = self.cbox_values
 
 class ParameterInputFrame(tk.Frame):
 
-    def __init__(self, master, dataframe, pandastable, **kwargs):
+    def __init__(self, master, view_table : pd.DataFrame, **kwargs):
         super().__init__(master, **kwargs)
-        self.dataframe = dataframe
-        self.pandastable = pandastable
+        self.columnconfigure(0, weight= 1)
+        self.columnconfigure(1, weight= 1)
+        self.view_table = view_table
+        if view_table.columns[4] == 'FALHA_2':
+            self.failures = self.view_table.apply(lambda row: f"{row['FALHA_1']} <-> {row['FALHA_2']}" if row['FALHA_2'] is not None else f"{row['FALHA_1']}", axis = 1).tolist()
+        else: self.failures = self.view_table['FALHA_1'].tolist()
+        self.create_widgets()
+        
+
+    def create_widgets(self):
+        self.create_failure_selection_frame()
+        self.create_failure_type_frame()
+
+    def create_failure_selection_frame(self):
+        failure_selection_frame =  tk.Frame(self)
+        failure_selection_label = tk.Label(failure_selection_frame, text= "Selecione a Falha:", justify= 'left')
+
+        self.failure_vars = tk.StringVar()
+        
+        self.failure_selection_cbox = ttk.Combobox(
+            failure_selection_frame,
+            values= self.failures,
+            textvariable= self.failure_vars)
+        
+        self.failure_selection_cbox.set(self.failures[0])
+        
+        failure_selection_label.pack(anchor='nw', padx=5, pady=5, expand= True)
+        self.failure_selection_cbox.pack(fill= 'x', padx=5, pady=5, expand=True)
+        
+        failure_selection_frame.grid(row= 0, column= 0, padx= 5, sticky='ew')
+
+    def create_failure_type_frame(self):
+        failure_type_frame = tk.Frame(self)
+
+        failure_type_label = tk.Label(
+            failure_type_frame, 
+            text= 'Selecione o Tipo de Falha', 
+            justify='left')
+        
+        self.type_vars = tk.StringVar()
+
+        self.failure_type_cbox = ttk.Combobox(
+            failure_type_frame,
+            values = ['Tipo 1', 'Tipo 2', 'Tipo 3'],
+            textvariable= self.type_vars
+        )
+        self.failure_type_cbox.set('Tipo 1')
+
+        failure_type_label.pack(anchor='nw', padx=5, pady=5, expand= True)
+        self.failure_type_cbox.pack(fill= 'both', expand= True)
+
+        failure_type_frame.grid(row= 0, column= 1, padx= 5, sticky='ew')
 
     def forget(self) -> None:
         for widget in self.winfo_children():
             widget.grid_forget()
 
 class OutputNotebook:
+
     def __init__(self, master : 'View', controller, **kwargs):
         self.master = master
         self.controller = controller
@@ -182,7 +178,10 @@ class OutputNotebook:
         self.notebook.pack(pady=(8,0), anchor='ne', fill='both', expand=True)
         self.add_table('Exemplo')
 
-    def add_table(self, title : str, view_table: pd.DataFrame | None = None, df: pd.DataFrame | None = None):
+    def add_table(
+            self, 
+            title : str, 
+            view_table: pd.DataFrame | None = None):
         """ ## Parameters:
         title: str
             Titulo da nova janela a ser apresentada
@@ -193,25 +192,30 @@ class OutputNotebook:
         df: pd.Dataframe | None
             Tabela original de dados. (Será testado se ainda é necessário)
         """
-
         ntab = tk.Frame(self.notebook)
         tableWindow = tk.Frame(ntab)
         
-        if df is None:
+        if view_table is None:
             ntabLabel = tk.Label(ntab,
                                 text="Seus outputs serão gerados aqui!",
                                 justify='left')
             ntabLabel.pack(anchor='n', fill='x', expand=True)
-        elif df.empty:
+        elif view_table.empty:
             return
         else:
             model = pdt.TableModel(view_table)
-            self.table = pdt.Table(tableWindow, model=model, showtoolbar=True, showstatusbar=True)
+            self.table = pdt.Table(
+                tableWindow, 
+                model=model, 
+                showtoolbar=True, 
+                editable=False)
             self.table.show()
-            tableWindow.pack(anchor='n', fill='both', expand=True)
+
+            tableWindow.pack(anchor='n', fill='x')
             ttk.Separator(ntab).pack(pady=5, fill='x', anchor='n')
-            inputsw = ParameterInputFrame(ntab, df, self.table)
-            inputsw.pack(anchor='s', fill='both', expand=True)
+
+            inputsw = ParameterInputFrame(ntab, view_table)
+            inputsw.pack(anchor='n', fill='both', expand=True)
 
         self.notebook.add(ntab, text=title)
         self.notebook.select(ntab)

@@ -9,7 +9,10 @@ BUS = 'BUS'
 
 class Controller():
     
+    table_collection = dict()
+    view_table_collection = dict()
     view = None
+
 
     def __init__(self, model : Model, view : View):
         self.model = model
@@ -28,8 +31,8 @@ class Controller():
                 buses, lines = self.model.create_net(file)
                 self.view.status_bar.set(f'Rede importada: {buses} Barras e {lines} conexões!')
                 self.view.dec.enable()
-    
-    def get_cbox_values(self, to : Literal['SUB', 'BUS']):
+
+    def get_options_cbox_values(self, to : Literal['SUB', 'BUS']):
         if to == SUB:
             return sorted(self.model.load_subs)
         elif to == BUS:
@@ -75,7 +78,7 @@ class Controller():
 
         flatDf = df.reset_index()
         return flatDf
-    
+
     def computeUnavailabilty(self, entry: str|None = None):
         if entry is None:
             entry = 'Todas SEs'
@@ -88,17 +91,21 @@ class Controller():
         for row in df.itertuples():
             index, se, bus, n = row[0:4]
             failures = row[4:]
-            df.at[index, 'ORDEM'] = len(failures) # TODO: Not working as intended!
+            df.at[index, 'ORDEM'] = int(len([failure for failure in failures if failure is not None])) # TODO: Not working as intended!
             df.at[index, 'IND'] = self.model.unavailabilty(failures)
+            df.at[index, 'DEC'] = None
+    
+        self.table_collection[entry] = df
+        self.view_table_collection[entry] = self.view_table(df)
 
-        self.view.output.add_table(title= f'{entry}', view_table = self.view_table(df), df = df)
+        self.view.output.add_table(title= f'{entry}', view_table = self.view_table_collection[entry])
         
 
     def view_table(self, df : pd.DataFrame):
         view_table = df.copy()
         view_table['N'] = view_table['N'] + 1
         
-        for col in df.columns[3:-2]: # iterate over all failure columns
+        for col in df.columns[3:-3]: # iterate over all failure columns
             view_table[col] = view_table[col].map(self.model.get_edge_name, na_action= 'ignore')
             
         return view_table

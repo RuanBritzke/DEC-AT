@@ -20,7 +20,7 @@ class App(tk.Tk):
 
         model = Model()
         view = View(self)
-        controller = Controller(model, view)
+        Controller(model, view)
         model.set_observer(view)
 
 
