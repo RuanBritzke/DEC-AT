@@ -14,33 +14,11 @@ from collections import defaultdict
 from itertools import combinations
 from functools import cached_property
 from numpy import array, add, prod
+from literals import *
 
-OFF: Literal = 'D'
-PV: Literal = 'PV'
-LOAD: Literal = 'LOAD'
-VOLTAGE_LEVEL: Literal = 'VOLTAGE_LEVEL'
-SUB: Literal = 'SUB'
-NAME: Literal = 'NAME'
-AREA: Literal = 'AREA'
-BUS_TYPE: Literal = 'BUS_TYPE'
-EDGE_TYPE: Literal = 'EDGE_TYPE'
-LD: Literal = 'LD'
-TRAFO: Literal = 'TRAFO'
-TEMPORARY_FAILURE_RATE: Literal = "TEMPORARY_FAILURE_RATE"
-PERMANENT_FAILURE_RATE: Literal = "PERMANENT_FAILURE_RATE"
-REPLACEMENT_TIME: Literal = "REPLACEMENT_TIME"
-REPAIR_TIME: Literal = "REPAIR_TIME"
-LOAD_TRANSFER_TIME: float = 1.5
-LOAD_TRANSFER: Literal = 0
-FAILURE: Literal = "Failure"
-PROP: Literal = "Característica"
-ORDER: Literal = 'Order'
-UT: Literal = 'Unavailability'
 Times = tuple[float, float]
 FailureRates = tuple[float, float]
 Unavailability = tuple[FailureRates, Times]
-
-SAIDI: Literal = 'SAIDI'
 
 def PU():
     return 1
@@ -105,7 +83,7 @@ def create_line(network: nx.MultiGraph, frm, to, circuit, x, mvar):
     ori, des = sorted([frm, to])
     voltage_level = network.nodes[frm][VOLTAGE_LEVEL]
     name = f'Linha CA {ori} ({network.nodes[ori][NAME]}) - {des} ({network.nodes[des][NAME]}) - {circuit}'
-    edge_type = LD
+    edge_type = DLINE
     length = line_length(x, mvar)
     permanent_failure_rate = 0
     replacement_time = 0
@@ -143,7 +121,7 @@ def create_trafo(network: nx.MultiGraph, frm, to, circuit):
         [frm, to], key=lambda x: network.nodes[x][VOLTAGE_LEVEL], reverse=True)
     hv = network.nodes[ori][VOLTAGE_LEVEL]
     lv = network.nodes[des][VOLTAGE_LEVEL]
-    edge_type = TRAFO
+    edge_type = XFMR
     length = 0
     name = f'Transformador ({network.nodes[ori][NAME]}) - ({network.nodes[des][NAME]}) - {circuit}'
     repair_time = 5
@@ -221,8 +199,17 @@ class Model:
         return (len(self.network.nodes), len(self.network.edges))
 
     def get_edge_name(self, edge):
+        """### Parametros:
+            self -> model\n
+            edge -> a ligação entre duas barras
+        ### Retorna:
+            tipo da ligação (transformador, linha)
+        """
         return self.network.edges[edge][NAME]
-            
+    
+    def get_edge_type(self, edge):
+        return self.network.edges[edge][EDGE_TYPE]
+
     @cached_property
     def source_buses(self):
         sources = set()
@@ -379,7 +366,6 @@ class Model:
         return failures
 
     def computeUnavailabiltyValues(self, failures : Iterable) -> tuple[FailureRates, Times]:
-        failures = [fail for fail in failures if fail is not None]
         order = len(failures)
         
         permanent_failure_rate = prod([self.network.edges[fail][PERMANENT_FAILURE_RATE] for fail in failures])

@@ -1,9 +1,11 @@
+from collections import defaultdict
 import tkinter as tk
 import tkinter.filedialog
 import pandas as pd
 from tkinter import ttk
 
 from custompandastable import *
+from literals import *
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -102,26 +104,33 @@ class DEC(tk.Frame):
         self.cbox["values"] = self.cbox_values
 
 
-class ParameterInputFrame(tk.Frame):
-    def __init__(self, master, view_table: pd.DataFrame, **kwargs):
+class FailureTreatmentFrame(tk.Frame):
+
+    failure_types_params = {DLINE : None,
+                            XFMR : None}
+    
+    def __init__(self, master, controller, title, view_table: pd.DataFrame, **kwargs):
         super().__init__(master, **kwargs)
+        self.controller = controller
+        self.title = title
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)
         self.view_table = view_table
-        if view_table.columns[4] == "FALHA_2":
+        if view_table.columns[-3] == "FALHA 2":
             self.failures = self.view_table.apply(
-                lambda row: f"{row['FALHA_1']} <-> {row['FALHA_2']}"
-                if row["FALHA_2"] is not None
-                else f"{row['FALHA_1']}",
+                lambda row: f"{row['FALHA 1']} <-> {row['FALHA 2']}"
+                if row["FALHA 2"] is not None
+                else f"{row['FALHA 1']}",
                 axis=1,
             ).tolist()
         else:
-            self.failures = self.view_table["FALHA_1"].tolist()
+            self.failures = self.view_table["FALHA 1"].tolist()
+        
         self.create_widgets()
 
     def create_widgets(self):
         self.create_failure_selection_frame()
-        self.create_failure_type_frame()
+        self.create_parameters_input_frame(order = None, failure_type = None)
 
     def create_failure_selection_frame(self):
         failure_selection_frame = tk.Frame(self)
@@ -133,41 +142,59 @@ class ParameterInputFrame(tk.Frame):
 
         self.failure_selection_cbox = ttk.Combobox(
             failure_selection_frame,
-            values=self.failures,
+            values= self.failures,
             textvariable=self.failure_vars,
         )
+        cmd = self.failure_selection_cbox.register(self.failure_selected)
+        self.failure_selection_cbox.bind("<<ComboboxSelected>>", cmd) # Tem que ser assim pra funcionar, não sei por que.
+        self.failure_selection_cbox.set('Falha')
 
-        self.failure_selection_cbox.set(self.failures[0])
 
         failure_selection_label.pack(anchor="nw", padx=5, pady=5, expand=True)
         self.failure_selection_cbox.pack(fill="x", padx=5, pady=5, expand=True)
 
-        failure_selection_frame.grid(row=0, column=0, padx=5, sticky="ew")
+        failure_selection_frame.pack(anchor='nw', fill='x')
+ 
+    def create_parameters_input_frame(self, order: int, failure_type: str): # TODO: Change this to int value input widet
+        parameters_input_frame = tk.Frame(self)
+        if failure_type is None:
+            return
+        self.create_dline_params_frame(parameters_input_frame)
+        parameters_input_frame.pack(anchor='center', fill='both', expand=True)
 
-    def create_failure_type_frame(self):
-        failure_type_frame = tk.Frame(self)
+    def create_dline_params_frame(self, master):
+        dline_params_frame = tk.Frame(master)
+        dline_params_frame.pack(anchor='center', fill='both', expand=True)
 
-        failure_type_label = tk.Label(
-            failure_type_frame, text="Selecione o Tipo de Falha", justify="left"
-        )
+        consumers_transferible_label = tk.Label(dline_params_frame, text="Percentual de consumidores transferiveis via alimentadores MT por chave manual [%]", justify='left')
+        consumers_transferible_label.grid(row=0, sticky='NE')
+        
+        consumers_transferible_text = tk.Text(dline_params_frame)
+        consumers_transferible_text.grid(row=1, sticky='NE')
+        
 
-        self.type_vars = tk.StringVar()
+        action_time_label = tk.Label(dline_params_frame, text="Tempo para acionamento da chave para transferir a carga entre alimentadores [h]", justify='left')
+        action_time_label.grid(row=2)
+        
+        action_time_text = tk.Text(dline_params_frame)
+        action_time_text.grid(row=3)
 
-        self.failure_type_cbox = ttk.Combobox(
-            failure_type_frame,
-            values=["Tipo 1", "Tipo 2", "Tipo 3"],
-            textvariable=self.type_vars,
-        )
-        self.failure_type_cbox.set("Tipo 1")
+        consumers_autotranferible_label = tk.Label(dline_params_frame, text="Percentual de consumidores transferiveis instantaneamente para outra linha [%]", justify= 'left')
+        consumers_autotranferible_label.grid(row=4)
+        
+        consumers_autotranferible_text = tk.Text(dline_params_frame)
+        consumers_autotranferible_text.grid(row= 5)
 
-        failure_type_label.pack(anchor="nw", padx=5, pady=5, expand=True)
-        self.failure_type_cbox.pack(fill="both", expand=True)
+        calculate_button = tk.Button(dline_params_frame, text='Calcular DEC')
+        calculate_button.grid(row=6)
+        
 
-        failure_type_frame.grid(row=0, column=1, padx=5, sticky="ew")
-
-    def forget(self) -> None:
-        for widget in self.winfo_children():
-            widget.grid_forget()
+    def failure_selected(self, *args):
+        # self.parameters_input_frame.destroy()
+        index = self.failure_selection_cbox.current()
+        order, failure_type = self.controller.get_failure_type(self.title, index)
+        self.create_parameters_input_frame(order, failure_type)
+        
 
 
 class OutputNotebook:
@@ -180,9 +207,7 @@ class OutputNotebook:
         self.notebook.pack(pady=(8, 0), anchor="ne", fill="both", expand=True)
         self.add_table("Exemplo")
         cmd = self.notebook.register(self.on_tab_closed)
-        self.notebook.tk.call(
-            "bind", self.notebook, "<<NotebookTabClosed>>", cmd + " %d"
-        )
+        self.notebook.bind("<<NotebookTabClosed>>", cmd + " %d")
 
     def add_table(self, title: str, view_table: pd.DataFrame | None = None):
         tab = tk.Frame(self.notebook)
@@ -199,17 +224,22 @@ class OutputNotebook:
         elif view_table.empty:
             return
         else:
-            model = TableModel(view_table)
+            cols = list(view_table.columns)
+            cols_len = len(cols)
+            visable_cols = cols[0:3] + cols[3 + int((cols_len-5)/2):] # isso aqui seria garantia de emprego
+
+            model = TableModel(view_table[visable_cols])
             self.table = MyCustonPandasTable(
                 tableWindow, model=model, showtoolbar=True, editable=False
             )
             self.table.show()
 
             tableWindow.pack(anchor="n", fill="x")
+
             ttk.Separator(tab).pack(pady=5, fill="x", anchor="n")
 
-            inputsw = ParameterInputFrame(tab, view_table)
-            inputsw.pack(anchor="n", fill="both")
+            inputs_window = FailureTreatmentFrame(tab, self.controller, title, view_table)
+            inputs_window.pack(anchor="n", fill="both")
 
         self.notebook.add(tab, text=title)
         self.notebook.select(tab)

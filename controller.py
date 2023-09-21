@@ -87,43 +87,61 @@ class Controller:
 
     def computeUnavailabilty(self, entry: str | None = None):
         if entry in self.view_tab_collection.keys():
-            old_tab_name = self.view_tab_collection[entry][0]
-            old_tab = self.view.output.tab_collection[old_tab_name]
+            old_tab = self.view.output.tab_collection[entry]
             self.view.output.notebook.select(old_tab)
             return
-        if entry is None:
-            entry = "Todas SEs"
+        if entry == "Todas SEs":
             df = self.generateFailureTable(scope=ALL)
         elif entry.isalpha():
             df = self.generateFailureTable(scope=SE, entry=entry)
         elif entry.isnumeric():
             df = self.generateFailureTable(scope=BUS, entry=int(entry))
+        else:
+            raise ValueError(f"entry value: {repr(entry)} isn't expected")
+        
+        df = self.view_table(df)
 
         for row in df.itertuples():
-            index, se, bus, n = row[0:4]
-            failures = row[4:]
-            df.at[index, "ORDEM"] = int(
-                len([failure for failure in failures if failure is not None])
-            )
+            maxorder = (len(row[1:]) - 3)/2
+            index = row[0]
+            failures = self.treat_failures(row[4:int(4+maxorder)])[0]
             df.at[index, "IND"] = self.model.unavailabilty(failures)
             df.at[index, "DEC"] = None
+            
+        self.view_tab_collection[entry] = df
 
-        view_table = self.view_table(df)
+        self.view.output.add_table(title=f"{entry}", view_table=df)
 
-        self.view_tab_collection[entry] = (entry, df, view_table)
-
-        self.view.output.add_table(title=f"{entry}", view_table=view_table)
-
-    def view_table(self, df: pd.DataFrame):
-        view_table = df.copy()
+    def view_table(self, view_table: pd.DataFrame):
         view_table["N"] = view_table["N"] + 1
 
-        for col in df.columns[3:-3]:  # iterate over all failure columns
-            view_table[col] = view_table[col].map(
+        for col in view_table.columns[3:]:  # iterate over all failure columns
+            new_col = " ".join(col.split("_"))
+            
+            view_table[new_col] = view_table[col].map(
                 self.model.get_edge_name, na_action="ignore"
             )
-
         return view_table
+    
+    def compute_dec(self, entry, index):
+        table = self.view_tab_collection[entry].iloc[index].to_list()
+        max_order = int((len(table) - 5)/2)
+        failures = [failure for failure in table[3:3+max_order] if failure is not None] 
+
+    def treat_failures(self, failures):
+        failures = [fail for fail in failures if fail is not None]
+        return failures, len(failures)
 
     def del_tab(self, entry):
         del self.view_tab_collection[entry]
+
+    def get_failure_type(self, entry, index):
+        df = self.view_tab_collection[entry]
+        row = df.iloc[index].to_list()
+        maxorder = (len(row[0:]) - 5)/2
+        failures, order = self.treat_failures(row[3:int(3+maxorder)])
+        if order == 1:
+            edge = failures[0]
+            return order, self.model.network.edges[edge][EDGE_TYPE]
+        if order > 1:
+            return (None, None)
