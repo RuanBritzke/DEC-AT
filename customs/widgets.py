@@ -3,78 +3,99 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Literal
 
-class Formulary:
+prompt = str
+key = str
+entry_type = Literal["Any", "float"]
 
-    def __init__(self, master, queries: list[tuple[str, Literal['any', 'float']]]) -> None:
-        self.container = tk.Frame(master, background='gray')
-        self.container.columnconfigure(0, weight=4, minsize=80)
-        self.container.columnconfigure(1, weight=1, minsize=40)
+
+class Formulary:
+    def __init__(self, master, args: list[tuple[key, prompt]]) -> None:
+        self.container = tk.Frame(master)
+        self.container.columnconfigure(0, weight=8, minsize=80)
+        self.container.columnconfigure(1, weight=1, minsize=35)
         self.container.bind("<Configure>", self.on_container_configure)
 
-        self.values = dict()
         self.labels = []
         self.entries = []
-        for i, (text, type_) in enumerate(queries):
-            label = tk.Label(self.container, text = text, background='white', anchor='w', justify='left')
+        self.values = dict()
+
+        for i, (key, text) in enumerate(args):
+            label = tk.Label(
+                self.container,
+                text=text,
+                background="white",
+                anchor="w",
+                justify="left",
+            )
+
             self.labels.append(label)
-            if type_ is None:
-                entry = ttk.Entry(self.container)
-            else:
-                entry = FloatEntry(self.container)
-            self.entries.append(label)
-            label.grid(row = i, column=0, sticky='nsew', padx=5, pady=5)
-            entry.grid(row = i, column=1, sticky="nsew", padx=(0,5), pady=5)
+
+            string_var = tk.StringVar()
+            string_var.set("0,00")
+
+            entry = FloatEntry(self.container, textvariable=string_var)
+
+            self.entries.append(entry)
+            self.values[key] = string_var
+
+            label.grid(row=i, column=0, sticky="nsew", padx=5, pady=5)
+            entry.grid(row=i, column=1, sticky="nsew", padx=(0, 5), pady=5)
 
     def on_container_configure(self, event):
         self.container.after(1, self.update_wraplengths)
 
     def update_wraplengths(self):
-        label : tk.Label
-        entry : ttk.Entry
+        label: tk.Label
         for label in self.labels:
-            label.config(wraplength = label.winfo_width())
-            
-    def grid(self,
-                *,
-                column: int, 
-                row : int, 
-                ipadx:  None | int = 0,
-                ipady: None | int = 0,
-                padx: None | int = 0,
-                pady: None | int = 0,
-                sticky: None | str | tuple[str, str]= "nsew",
-                in_ : None | tk.Misc = None,
-                **kwargs) -> None:
+            label.config(wraplength=label.winfo_width())
 
+    def get_entry_values(self):
+        return {key: value.get_value() for key, value in self.values.items()}
+
+    def grid(
+        self,
+        *,
+        column: int,
+        row: int,
+        ipadx: None | int = 0,
+        ipady: None | int = 0,
+        padx: None | int = 0,
+        pady: None | int = 0,
+        sticky: None | str | tuple[str, str] = "nsew",
+        in_: None | tk.Misc = None,
+        **kwargs,
+    ) -> None:
         self.container.grid(
-            column = column,
-            row = row,
-            ipadx = ipadx,
-            ipady = ipady,
-            padx = padx, 
-            pady = pady,
-            sticky = sticky[1],
-            in_ = in_,
-            **kwargs)
+            column=column,
+            row=row,
+            ipadx=ipadx,
+            ipady=ipady,
+            padx=padx,
+            pady=pady,
+            sticky=sticky[1],
+            in_=in_,
+            **kwargs,
+        )
 
-    def pack(self,
-            *,
-            after : None | tk.Misc = None,
-            anchor : None | str = None,
-            before : None | str = None,
-            expand : bool = False,
-            fill: Literal['none', 'x', 'y', 'both'] = 'none',
-            side: Literal['left', 'right', 'top', 'botton'] = 'left', 
-            ipadx:  None | int = 0,
-            ipady: None | int = 0,
-            padx: None | int | tuple[int, int] = 0,
-            pady: None | int | tuple[int, int] = 0,
-            in_ : None | tk.Misc = None,
-            **kwargs):
-        
+    def pack(
+        self,
+        *,
+        after: None | tk.Misc = None,
+        anchor: None | str = None,
+        before: None | str = None,
+        expand: bool = False,
+        fill: Literal["none", "x", "y", "both"] = "none",
+        side: Literal["left", "right", "top", "botton"] = "left",
+        ipadx: None | int = 0,
+        ipady: None | int = 0,
+        padx: None | int | tuple[int, int] = 0,
+        pady: None | int | tuple[int, int] = 0,
+        in_: None | tk.Misc = None,
+        **kwargs,
+    ):
         self.container.pack(
             after=after,
-            anchor=anchor, 
+            anchor=anchor,
             before=before,
             expand=expand,
             fill=fill,
@@ -83,32 +104,52 @@ class Formulary:
             ipady=ipady,
             padx=padx,
             pady=pady,
-            in_ = in_
+            in_=in_,
         )
+
 
 class FloatEntry(ttk.Entry):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, validate="key", **kwargs)
         vcmd = (self.register(self.on_validate), "%P")
-        self.config(validatecommand= vcmd)
+        self.config(validatecommand=vcmd)
 
     def on_validate(self, P):
         return self.validate(P)
-    
+
     def validate(self, string):
         regex = re.compile(r"(\+|\-)?[0-9,]*$")
         result = regex.match(string)
-        return (string == ""
-                or (string.count('+') <= 1
-                    and string.count('-') <= 1
-                    and string.count(',') <= 1
-                    and result is not None
-                    and result.group(0) != ""))
-    
-    @property
-    def get_entry(self):
-        return float(self.get().replace(",", "."))
-    
+        return string == "" or (
+            string.count("+") <= 1
+            and string.count("-") <= 1
+            and string.count(",") <= 1
+            and result is not None
+            and result.group(0) != ""
+        )
+
+    def get_value(self):
+        try:
+            return float(self.get().replace(",", "."))
+        except:
+            raise ValueError(f"{self.get()} isn't compatible with floats")
+
+
+class StatusBar(tk.Frame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
+        self.config(highlightbackground="black", highlightthickness=1)
+        self.label = tk.Label(self, text="", bg="white")
+        self.label.pack(side="left")
+        self.pack(side="bottom", fill="x")
+
+    def set(self, newText):
+        self.label.config(text=newText)
+
+    def clear(self):
+        self.label.config(text="")
+
+
 class CustomNotebook(ttk.Notebook):
     """A ttk Notebook with close buttons on each tab"""
 

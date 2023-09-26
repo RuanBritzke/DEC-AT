@@ -7,16 +7,17 @@ from model import Model
 from view import View
 from controller import Controller
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action="ignore", category=FutureWarning)
+
 
 class App(tk.Tk):
-    
     def __init__(self):
         super().__init__()
 
-        self.geometry("500x350")
-        self.state('iconic')
-        self.title("DEC-AT")    
+        self.geometry("1100x600")
+        self.minsize(800, 800)
+        self.state("iconic")
+        self.title("DEC-AT")
 
         model = Model()
         view = View(self)
