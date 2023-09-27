@@ -254,7 +254,6 @@ class Model:
     def get_load_buses_from_sub(self, sub: str):
         return list(self.v[sub])
 
-
     def get_bus_name(self, bus):
         return self.network.nodes[bus][NAME]
 
@@ -296,6 +295,9 @@ class Model:
             raise nx.NodeNotFound("Source node %s not in graph" % bus)
         if bus in self.source_buses:
             return []
+
+        # é possível calcular a distancia maxima dependendo da carga da barra, e impedancia da linha: 
+        # interessante para não ser necessário o estudo do fluxo de potência.  
 
         visited = [bus]
         stack = [iter(self.network.edges(bus, keys=True))]
@@ -365,7 +367,7 @@ class Model:
             
         return failures
 
-    def computeUnavailabiltyValues(self, failures : Iterable) -> tuple[FailureRates, Times]:
+    def computeUnavailabilityValues(self, failures : Iterable) -> tuple[FailureRates, Times]:
         order = len(failures)
         
         permanent_failure_rate = prod([self.network.edges[fail][PERMANENT_FAILURE_RATE] for fail in failures])
@@ -376,17 +378,19 @@ class Model:
         failure_rates = (permanent_failure_rate, temporary_failure_rate)
         repair_times = (replacement_time, repair_time)
 
-        unavailability = ((permanent_failure_rate*replacement_time + temporary_failure_rate+repair_time) + (permanent_failure_rate*temporary_failure_rate))/(8760**(order-1))
+        unavailability = ((permanent_failure_rate*replacement_time + temporary_failure_rate*repair_time) + (permanent_failure_rate*temporary_failure_rate))/(8760**(order-1))
 
         return (unavailability, failure_rates, repair_times)
 
-    def unavailabilty(self, failures) -> float:
-        return self.computeUnavailabiltyValues(failures)[0]
+    def unavailability(self, failures) -> float:
+        return self.computeUnavailabilityValues(failures)[0]
 
-    def compute_saidi(
+    def compute_dec(
             self,
-            failure: Iterable,
             *,
+            group_consumers: int,
+            hit_consumers: int,
+            failure: Iterable,
             beta=1,
             ma: float = 0,
             mc: float = 0,
@@ -394,10 +398,22 @@ class Model:
             ta: float = 0,
             tc: float = 0):
         
-        (_, (permanent_failure_rate, temporary_failure_rate), (replacement_time,repair_time)) = self.unavailability(failure)
+        if group_consumers == 0: group_consumers = 1
+        if hit_consumers == 0: hit_consumers = 1
+
+        factor = hit_consumers/group_consumers
+
+        ma = ma/100
+        mc = mc/100
+        md = md/100
+        ta = ta/100
+        tc = tc/100
+
+        order = len(failure)
+        (_, (permanent_failure_rate, temporary_failure_rate), (replacement_time,repair_time)) = self.computeUnavailabilityValues(failure)
         replacement = beta*permanent_failure_rate*replacement_time
         rapair = beta*temporary_failure_rate*repair_time        
         rates = permanent_failure_rate + temporary_failure_rate
 
-        ut = ((replacement + rapair)*(1 - ma - mc - md) + (rates)*(ta*ma + tc*mc))
-        return ut
+        unavailability_time = ((replacement + rapair)*(1 - ma - mc - md) + (rates)*(ta*ma + tc*mc))/(8760**(order-1))
+        return factor*unavailability_time

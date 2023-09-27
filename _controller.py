@@ -216,7 +216,8 @@ class Controller:
                 break
             else:
                 view.print_temporary_message(
-                    f'{pwf_path!r} não é do formato .pwf, escolha um arquivo .pwf\nPressione "Enter" para continuar.')
+                    f'''{pwf_path!r} não é do formato .pwf, escolha um arquivo .pwf
+                    Pressione "Enter" para continuar.''')
                 input()
         self.model.pwf_path = pwf_path
 
