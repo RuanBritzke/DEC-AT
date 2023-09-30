@@ -1,5 +1,5 @@
 """
 My custom modifications to pandatables, tkinter widget
 """
-from .tables import *
-from .widgets import *
+from .customs.tables import *
+from .customs.widgets import *

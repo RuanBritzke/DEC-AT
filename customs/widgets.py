@@ -8,8 +8,8 @@ key = str
 entry_type = Literal["Any", "float"]
 
 
-class Formulary:
-    def __init__(self, master, args: list[tuple[key, prompt]]) -> None:
+class Form:
+    def __init__(self, master, prompts = dict[key : str]) -> None:
         self.container = tk.Frame(master)
         self.container.columnconfigure(0, weight=8, minsize=80)
         self.container.columnconfigure(1, weight=1, minsize=35)
@@ -19,11 +19,11 @@ class Formulary:
         self.entries = []
         self.values = dict()
 
-        for i, (key, text) in enumerate(args):
+        for i, (key, text) in enumerate(prompts.items()):
+            
             label = tk.Label(
                 self.container,
                 text=text,
-                background="white",
                 anchor="w",
                 justify="left",
             )
@@ -31,12 +31,10 @@ class Formulary:
             self.labels.append(label)
 
             string_var = tk.StringVar()
-            string_var.set("0,00")
-
             entry = FloatEntry(self.container, textvariable=string_var)
 
             self.entries.append(entry)
-            self.values[key] = string_var
+            self.values[key] = entry
 
             label.grid(row=i, column=0, sticky="nsew", padx=5, pady=5)
             entry.grid(row=i, column=1, sticky="nsew", padx=(0, 5), pady=5)
@@ -107,6 +105,9 @@ class Formulary:
             in_=in_,
         )
 
+    def destroy(self):
+        self.container.destroy()
+
 
 class FloatEntry(ttk.Entry):
     def __init__(self, *args, **kwargs):
@@ -129,11 +130,9 @@ class FloatEntry(ttk.Entry):
         )
 
     def get_value(self):
-        try:
-            return float(self.get().replace(",", "."))
-        except:
-            raise ValueError(f"{self.get()} isn't compatible with floats")
-
+        if self.get() == "":
+            return 0.0
+        return float(self.get().replace(",", "."))
 
 class StatusBar(tk.Frame):
     def __init__(self, master, **kwargs):

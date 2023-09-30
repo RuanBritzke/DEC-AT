@@ -14,7 +14,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        self.geometry("1100x600")
+        self.geometry("1100x500")
         self.minsize(800, 800)
         self.state("iconic")
         self.title("DEC-AT")

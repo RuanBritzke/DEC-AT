@@ -59,3 +59,10 @@ class MyCustonPandasTable(Table):
         if hasattr(self, "pf"):
             self.pf.updateData()
         return
+    
+    def clearTable(self):
+        self.storeCurrent()
+        model = TableModel(pd.DataFrame())
+        self.updateModel(model)
+        self.redraw()
+        return
