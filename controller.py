@@ -102,30 +102,28 @@ class Controller:
         df = self.view_table(df)
 
         for row in df.itertuples():
-            maxorder = (len(row[1:]) - 3)/2
+            maxorder = (len(row[1:]) - 3) / 2
             index = row[0]
-            failures = self.treat_failures(row[4:int(4+maxorder)])[0]
+            failures = self.treat_failures(row[4 : int(4 + maxorder)])[0]
             df.at[index, "IND"] = self.model.unavailability(failures)
             df.at[index, "DEC"] = None
-            
+
         self.view_tab_collection[entry] = df
-        print(f"add_title(title = {entry}, view_table={df}") # Debugging
         self.view.output.add_table(title=f"{entry}", view_table=df)
 
     def view_table(self, view_table: pd.DataFrame):
         for col in view_table.columns[3:]:  # iterate over all failure columns
             new_col = " ".join(col.split("_"))
-            
+
             view_table[new_col] = view_table[col].map(
                 self.model.get_edge_name, na_action="ignore"
             )
         return view_table
-    
-    def compute_dec(self,*, entry:str, index:int, **kwargs:dict):
-        print(f"compute_dec(entry= {entry}, index= {index}, kwargs= {kwargs})")
+
+    def compute_dec(self, *, entry: str, index: int, **kwargs: dict):
         dec = self.model.compute_dec(**kwargs)
-        df : pd.DataFrame = self.view_tab_collection[entry]
-        df.at[index,'DEC'] = dec
+        df: pd.DataFrame = self.view_tab_collection[entry]
+        df.at[index, "DEC"] = dec
         self.view.output.update_table(self.view.output.tab_collection[entry][1], df)
         return
 
@@ -139,12 +137,19 @@ class Controller:
     def get_failure_atts(self, entry, index):
         df = self.view_tab_collection[entry]
         row = df.iloc[index].to_list()
-        maxorder = (len(row[0:]) - 5)/2
-        failures, order = self.treat_failures(row[3:int(3+maxorder)])
+        maxorder = (len(row[0:]) - 5) / 2
+        failures, order = self.treat_failures(row[3 : int(3 + maxorder)])
         if order == 1:
             edge = failures[0]
             return failures, order, self.model.network.edges[edge][EDGE_TYPE]
         if order == 2:
             edge1 = failures[0]
             edge2 = failures[1]
-            return failures, order, (self.model.network.edges[edge1][EDGE_TYPE], self.model.network.edges[edge2][EDGE_TYPE])
+            return (
+                failures,
+                order,
+                (
+                    self.model.network.edges[edge1][EDGE_TYPE],
+                    self.model.network.edges[edge2][EDGE_TYPE],
+                ),
+            )

@@ -55,8 +55,6 @@ class DEC(tk.Frame):
         self.pack(anchor="nw")
         ttk.Separator(master).pack(pady=5, fill="x", anchor="n")
 
-
-
     def search_box(self):
         root = tk.Frame(self)
         self.vars = tk.StringVar()
@@ -75,7 +73,6 @@ class DEC(tk.Frame):
     def startSearch(self, *args):
         search_value = self.cbox.get()
         self.root.status_bar.set(f"Calculando Indisponibilidade para {search_value}")
-        print(f"self.controller.computeUnavailabilty(entry={search_value})") # Debugging
         self.controller.computeUnavailabilty(entry=search_value)
         self.root.status_bar.set("Pronto!")
 
@@ -152,8 +149,6 @@ class OutputNotebook:
             return
         else:
             visable_cols = (col for col in view_table.columns if "_FALHA_" not in col)
-            print(visable_cols)
-
             model = TableModel(view_table[visable_cols])
             table = MyCustonPandasTable(
                 tableWindow, model=model, showtoolbar=True, editable=False
@@ -178,28 +173,29 @@ class OutputNotebook:
         if data != "Exemplo":
             self.controller.del_tab(data)
 
-    def update_table(self, table : MyCustonPandasTable, new_data: pd.DataFrame):
+    def update_table(self, table: MyCustonPandasTable, new_data: pd.DataFrame):
         visable_cols = (col for col in new_data.columns if "_FALHA_" not in col)
         table.updateModel(TableModel(new_data[visable_cols]))
         table.redraw()
 
-class FailureTreatmentFrame(tk.Frame):
 
+class FailureTreatmentFrame(tk.Frame):
     arguments = dict()
 
     def __init__(self, master, controller, title, view_table: pd.DataFrame, **kwargs):
         super().__init__(master, **kwargs)
         self.controller = controller
         self.title = title
-        self.arguments['entry'] = self.title
+        self.arguments["entry"] = self.title
         self.view_table = view_table
 
-        substring = 'FALHA '
+        substring = "FALHA "
         fail_cols = [col for col in self.view_table.columns if substring in col]
-        print("fail_cols", fail_cols)
-        self.failures = self.view_table[fail_cols].apply(
-            lambda row: " <-> ".join(filter(None, row)), axis=1
-        ).tolist()
+        self.failures = (
+            self.view_table[fail_cols]
+            .apply(lambda row: " <-> ".join(filter(None, row)), axis=1)
+            .tolist()
+        )
 
         self.create_widgets()
         return
@@ -213,26 +209,32 @@ class FailureTreatmentFrame(tk.Frame):
     def create_consumer_units_in_set_frame(self):
         consumer_units_in_set_frame = tk.Frame(self)
         consumer_units_in_set_frame.pack(anchor="nw", fill="x", expand="True")
-        
+
         self.consumer_units_in_set_form = Form(
-            consumer_units_in_set_frame, 
-            {"group_consumers" : "Número de unidades consumidoras do conjunto",
-             "hit_consumers" : "Número de unidades consumidoras atingidas"})
+            consumer_units_in_set_frame,
+            {
+                "group_consumers": "Número de unidades consumidoras do conjunto",
+                "hit_consumers": "Número de unidades consumidoras atingidas",
+            },
+        )
         self.consumer_units_in_set_form.pack(anchor="nw", fill="x", expand="True")
         return self
 
     def create_failure_selection_frame(self):
-        failure_selection_frame = tk.Frame(self,)
+        failure_selection_frame = tk.Frame(
+            self,
+        )
         failure_selection_frame.columnconfigure(0, weight=8, minsize=80)
         failure_selection_frame.columnconfigure(1, weight=1, minsize=35)
         failure_selection_frame.pack(anchor="nw", fill="x", expand=True)
-        
+
         failure_selection_label = tk.Label(
-            failure_selection_frame, 
+            failure_selection_frame,
             text="Selecione a Falha:",
-            anchor='w',
-            justify="left")
-        failure_selection_label.grid(row=0,column=0, padx=5, pady=5, sticky='nsew')
+            anchor="w",
+            justify="left",
+        )
+        failure_selection_label.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
 
         self.failure_vars = tk.StringVar()
 
@@ -245,18 +247,22 @@ class FailureTreatmentFrame(tk.Frame):
         self.failure_selection_cbox.bind(
             "<<ComboboxSelected>>", cmd
         )  # Tem que ser assim pra funcionar, não sei por que.
-        self.failure_selection_cbox.grid(row=0, column=1, padx=5, pady=5, sticky='nsew')
+        self.failure_selection_cbox.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
         self.failure_selection_cbox.set("Falha")
 
     def failure_selected(self, *args):
         self.parameters_input_frame.destroy()
         index = self.failure_selection_cbox.current()
-        self.arguments['index'] = index
-        failures, order, failure_type = self.controller.get_failure_atts(self.title, index)
-        self.arguments['failure'] = failures
+        self.arguments["index"] = index
+        failures, order, failure_type = self.controller.get_failure_atts(
+            self.title, index
+        )
+        self.arguments["failure"] = failures
         self.create_parameters_input_frame(order, failure_type)
 
-    def create_parameters_input_frame(self, order: int, failure_type: str | tuple[str, str]):
+    def create_parameters_input_frame(
+        self, order: int, failure_type: str | tuple[str, str]
+    ):
         if (
             hasattr(self, "parameters_input_frame")
             and self.parameters_input_frame.winfo_exists()
@@ -269,14 +275,16 @@ class FailureTreatmentFrame(tk.Frame):
         else:
             if order == 1:
                 if failure_type == XFMR:
-                    self.create_xfmr_topology_frame(master = self.parameters_input_frame)
-                else: # failure_type == DLINE:
-                    self.topology_selected(master= self.parameters_input_frame, failure_type=DLINE)
+                    self.create_xfmr_topology_frame(master=self.parameters_input_frame)
+                else:  # failure_type == DLINE:
+                    self.topology_selected(
+                        master=self.parameters_input_frame, failure_type=DLINE
+                    )
             if order == 2:
-                print(failure_type)
+                # TODO: Falhas de segunda ordem
+                pass
 
-
-        self.parameters_input_frame.pack(anchor="center", fill="both", expand=True)
+            self.parameters_input_frame.pack(anchor="center", fill="both", expand=True)
 
     def create_xfmr_topology_frame(self, master):
         xfmr_topology_frame = tk.Frame(master)
@@ -287,9 +295,12 @@ class FailureTreatmentFrame(tk.Frame):
         xfmr_topology_cbox_label = tk.Label(
             xfmr_topology_frame,
             text="Selecione a Topologia do Transformador:",
-            anchor='w',
-            justify="left")
-        xfmr_topology_cbox_label.grid(row=0, column=0, padx=(5,0), pady=5, sticky='nsew')
+            anchor="w",
+            justify="left",
+        )
+        xfmr_topology_cbox_label.grid(
+            row=0, column=0, padx=(5, 0), pady=5, sticky="nsew"
+        )
 
         self.topology_var = tk.StringVar()
         self.xfmr_topology_cbox = ttk.Combobox(
@@ -298,64 +309,64 @@ class FailureTreatmentFrame(tk.Frame):
             values=["A", "B", "C", "D"],
         )
         self.xfmr_topology_cbox.set("Topologias")
-        self.xfmr_topology_cbox.grid(row=0, column=1, padx=5, pady=5, sticky='nsew')
+        self.xfmr_topology_cbox.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
 
         # binding function to combobox selection
         self.xfmr_topology_cbox.bind(
-            "<<ComboboxSelected>>", 
+            "<<ComboboxSelected>>",
             lambda event: self.topology_selected(
-                master= self.parameters_input_frame, 
-                failure_type=self.xfmr_topology_cbox.current()))
+                master=self.parameters_input_frame,
+                failure_type=self.xfmr_topology_cbox.current(),
+            ),
+        )
         return
 
     def topology_selected(
-            self,
-            *, 
-            master : tk.Frame | None = None, 
-            failure_type : str | None = None):
-
-        if (
-            hasattr(self, "formulary")
-            and self.formulary.container.winfo_exists()
-        ):
+        self, *, master: tk.Frame | None = None, failure_type: str | None = None
+    ):
+        if hasattr(self, "formulary") and self.formulary.container.winfo_exists():
             self.formulary.destroy()
         if (
             hasattr(self, "calculate_dec_button")
             and self.calculate_dec_button.winfo_exists()
         ):
             self.calculate_dec_button.destroy()
-        
-        self.arguments['beta'] = self.failure_types[failure_type][0]
-        prompts = {key: self.param_prompt_dict[key] for key in self.failure_types[failure_type][1]}
+
+        self.arguments["beta"] = self.failure_types[failure_type][0]
+        prompts = {
+            key: self.param_prompt_dict[key]
+            for key in self.failure_types[failure_type][1]
+        }
 
         self.formulary = Form(master, prompts)
-        self.formulary.pack(side="top", anchor="nw", fill = "x", expand="true")
+        self.formulary.pack(side="top", anchor="nw", fill="x", expand="true")
 
         self.calculate_dec_button = tk.Button(
-            master,
-            text="Calcular DEC",
-            command=self.send_params)
-        self.calculate_dec_button.pack(side = "bottom", anchor="se", padx=5)
+            master, text="Calcular DEC", command=self.send_params
+        )
+        self.calculate_dec_button.pack(side="bottom", anchor="se", padx=5)
         return
 
     def send_params(self):
         self.arguments.update(self.consumer_units_in_set_form.get_entry_values())
         self.arguments.update(self.formulary.get_entry_values())
-        print(self.arguments)
-        self.controller.compute_dec(**self.arguments) # TODO: Preguiça de detalhar os inputs
+        print(f"send_params({self.arguments})")
+        self.controller.compute_dec(
+            **self.arguments
+        )  # TODO: Preguiça de detalhar os inputs
 
     failure_types = {
-        DLINE : [1, ("ma", "ta", "md")],
-        0: [1, ("ma", "ta", "md")],              # 0 = A : beta = 1
+        DLINE: [1, ("ma", "ta", "md")],
+        0: [1, ("ma", "ta", "md")],  # 0 = A : beta = 1
         1: [2, ("ma", "ta", "mc", "tc", "md")],  # 1 = B : beta = 2
         2: [2, ("ma", "ta", "mc", "tc", "md")],  # 2 = C : beta = 2
-        3: [1, ("ma", "ta", "tc", "md")],        # 3 = D : beta = 1
+        3: [1, ("ma", "ta", "tc", "md")],  # 3 = D : beta = 1
     }
 
     param_prompt_dict = {
-        "ma" : "Percentual de consumidores transferiveis via alimentadores MT por chave manual [%]",
-        "ta" : "Tempo para acionamento da(s) chave(s) para transferir a carga entre os alimentadores [h]",
-        "mc" : "Percentual de consumidores transferiveis instantaneamente para outro transformador [%]",
-        "tc" : "Tempo para acionamento da chave para transferir a carga entre transformadores [h]",
-        "md" : "Percentual de consumidores transferiveis instantaneamente para outro(a) transformador/linha [%]",
+        "ma": "Percentual de consumidores transferiveis via alimentadores MT por chave manual [%]",
+        "ta": "Tempo para acionamento da(s) chave(s) para transferir a carga entre os alimentadores [h]",
+        "mc": "Percentual de consumidores transferiveis instantaneamente para outro transformador [%]",
+        "tc": "Tempo para acionamento da chave para transferir a carga entre transformadores [h]",
+        "md": "Percentual de consumidores transferiveis instantaneamente para outro(a) transformador/linha [%]",
     }
