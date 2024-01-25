@@ -4,13 +4,16 @@ from collections import namedtuple
 
 
 # General Literals
-ON = "L"
-OFF = "D"
+ON = 1
+OFF = 0
 PQ0 = "0"
 PV = "1"
 V = "2"
 PQ3 = "3"
 PQ = [PQ0, PQ3]
+BPV = "1"
+BPQ = "0"
+REF = "2"
 VOLTAGE_LEVEL = "VOLTAGE_LEVEL"
 SUB = "SUB"
 BUS = "BUS"
@@ -29,6 +32,8 @@ UT = "Unavailability"
 XFMR = "XFMR"
 METAL = "Metalica"
 
+NF = "NF"
+NA = "NA"
 # Model Literals
 TEMPORARY_FAILURE_RATE = "TEMPORARY_FAILURE_RATE"
 PERMANENT_FAILURE_RATE = "PERMANENT_FAILURE_RATE"

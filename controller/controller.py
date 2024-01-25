@@ -3,6 +3,7 @@ import os
 from model import *
 from view import *
 from utils import functions
+from numpy import nan
 ALL = "All"
 SE = "SE"
 BUS = "BUS"
@@ -242,7 +243,7 @@ class Controller:
                 [new_df, pd.DataFrame(new_row, index=[0])], ignore_index=True
             )
         # new_df.drop(index, inplace=True)
-        new_df.replace(np.nan, None, inplace=True)
+        new_df.replace(nan, None, inplace=True)
         new_df.sort_values("N", axis="index", inplace=True)
         new_df.reset_index(drop=True, inplace=True)
         ic(new_df)

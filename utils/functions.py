@@ -1,6 +1,5 @@
-import os, sys
-from itertools import zip_longest
-from itertools import accumulate
+import os, sys, math
+from itertools import zip_longest, accumulate, combinations
 from collections import defaultdict
 
 from utils.contants import *
@@ -61,3 +60,16 @@ def pwf_parser(pwf_path: os.PathLike) -> dict:
                     parsed_data_stripped = tuple(item.strip() for item in parsed_data)
                     data[current_header].append(parsed_data_stripped)
     return data
+
+
+def power_set(entities, max_size=math.inf):
+    n = min(len(entities), max_size)
+    for i in range(1, n + 1):
+        yield from combinations(entities, r=i)
+
+
+def line_length(X, B):
+    """Returns the aproximate length of the line in kms."""
+    if math.isnan(X) or math.isnan(B):
+        return 0
+    return 7.8 * math.sqrt(X * B)

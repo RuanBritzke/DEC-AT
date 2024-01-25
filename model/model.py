@@ -1,32 +1,18 @@
 import math
 import networkx as nx
 import pandas as pd
-import struct
 
 pd.options.mode.chained_assignment = None  # default='warn'
+pd.set_option('future.no_silent_downcasting', True)
 
 from io import StringIO
 from typing import Literal, Iterable
-from utils.functions import pwf_parser
+from utils.functions import pwf_parser, line_length, power_set
 from utils.contants import *
 from collections import defaultdict
-from itertools import combinations
 from functools import cached_property
 from numpy import array, add, prod
 from os import PathLike
-
-
-def power_set(entities, max_size=math.inf):
-    n = min(len(entities), max_size)
-    for i in range(1, n + 1):
-        yield from combinations(entities, r=i)
-
-
-def line_length(X, B):
-    """Returns the aproximate length of the line in kms."""
-    if math.isnan(X) or math.isnan(B):
-        return 0
-    return 7.8 * math.sqrt(X * B)
 
 
 def get_tower_type(name):
@@ -54,7 +40,7 @@ def get_xfmr_rates_and_times(vp, vs):
 
 
 class Model(nx.MultiGraph):
-    max_order = 2
+    max_order = 3
     path_cutoff_distance = 200
 
     def __init__(self, *args, **kwargs):
@@ -76,8 +62,8 @@ class Model(nx.MultiGraph):
                     voltage = 1.0
                 new_model.DGBT[key] = voltage
 
-        for value in data[DBAR]:
-            if not value:
+        for bus in data[DBAR]:
+            if not bus:
                 continue
             (
                 cod,
@@ -110,23 +96,25 @@ class Model(nx.MultiGraph):
                 agg8,
                 agg9,
                 agg10,
-            ) = value
+            ) = bus
 
-            if not state:
+            if (state == "") or (state == "L"):
                 state = ON
-
-            if state == OFF:
-                # por enquanto ignora, depois implementar buscas separadas para barras desligadas ou ligadas
-                continue
+            if state == "D":
+                state == OFF
 
             cod = int(cod)
             area = int(area)
 
-            if not base_voltage_level_group:
+            if base_voltage_level_group == "":
                 base_voltage_level_group = "0"
 
-            if not bus_type:
-                bus_type = "0"
+            if bus_type == "" or bus_type == "0" or bus_type == "3":
+                bus_type = BPQ
+            elif bus_type == "1":
+                bus_type = BPV
+            else:  # bus_type == "2"
+                bus_type == REF
 
             name: str
             name = name.replace("/", "-")
@@ -136,6 +124,10 @@ class Model(nx.MultiGraph):
                 NAME=name,
                 SUB=name.split("-")[0],
                 VOLTAGE_LEVEL=new_model.DGBT[base_voltage_level_group],
+                PG=float(active_power) if active_power != "" else 0,
+                QG=float(reactive_power) if reactive_power != "" else 0,
+                PL=float(active_load) if active_load != "" else 0,
+                QL=float(reactive_load) if reactive_load != "" else 0,
                 AREA=area,
                 BUS_TYPE=bus_type,
                 STATE=state,
@@ -176,15 +168,10 @@ class Model(nx.MultiGraph):
                 agg10,
             ) = edge
 
-            if not origin_state:
-                origin_state = ON
-            if not destiny_state:
-                destiny_state = ON
-            states = [state, origin_state, destiny_state]
-            state = OFF if any([value == OFF for value in states]) else ON
-            if state == OFF:
-                # por enquanto, depois implementar buscas separadas para barras desligadas ou ligadas
-                continue
+            if (state == "") or (state == "L"):
+                state = NF
+            else:
+                state = NA
 
             origin = int(origin)
             destiny = int(destiny)
@@ -197,7 +184,12 @@ class Model(nx.MultiGraph):
                 b = 0
 
             if not tap:
-                name = f"Linha CA {origin} ({new_model.nodes[origin][NAME]}) - {destiny} ({new_model.nodes[destiny][NAME]}) {circuit}"
+                if new_model.nodes[origin][VOLTAGE_LEVEL] > 138:
+                    line_type = "LT"
+                    name = f"LT {origin} - {destiny} ({circuit})"
+                else:
+                    line_type = "LD"
+                    name = f"LD {origin} - {destiny} ({circuit})"
                 weight = line_length(float(x), float(b))
                 (
                     temporary_failure_rate,
@@ -206,24 +198,23 @@ class Model(nx.MultiGraph):
                     new_model.nodes[origin][VOLTAGE_LEVEL]
                 )
 
-                state = origin_state == destiny_state and origin_state != OFF
                 new_model.add_edge(
                     origin,
                     destiny,
                     key=circuit,
                     weight=weight,
                     NAME=name,
+                    STATE=state,
                     PROP=get_tower_type(name),
-                    EDGE_TYPE=DLIN,
+                    EDGE_TYPE=line_type,
                     PERMANENT_FAILURE_RATE=0,
                     REPLACEMENT_TIME=0,
                     TEMPORARY_FAILURE_RATE=temporary_failure_rate * weight,
                     REPAIR_TIME=repair_time,
-                    STATE=state,
                 )
                 continue
 
-            name = f"Transformador ({new_model.nodes[destiny][NAME]}) - ({new_model.nodes[destiny][NAME]}) {circuit}"
+            name = f"TR {new_model.nodes[destiny][NAME]} - ({new_model.nodes[destiny][NAME]}) ({circuit})"
             hv_lv = sorted(
                 [
                     new_model.nodes[origin][VOLTAGE_LEVEL],
@@ -236,14 +227,16 @@ class Model(nx.MultiGraph):
                 replacement_time,
                 temporary_failure_rate,
             ) = get_xfmr_rates_and_times(*hv_lv)
+
             new_model.add_edge(
                 origin,
                 destiny,
                 key=circuit,
                 weight=0,
                 NAME=name,
+                STATE=state,
+                EDGE_TYPE="TR",
                 PROP="{}/{} kV".format(*hv_lv),
-                EDGE_TYPE=XFMR,
                 PERMANENT_FAILURE_RATE=permanent_failure_rate,
                 REPLACEMENT_TIME=replacement_time,
                 TEMPORARY_FAILURE_RATE=temporary_failure_rate,
@@ -265,7 +258,7 @@ class Model(nx.MultiGraph):
 
     @cached_property
     def source_buses(self):
-        sources = set()
+        sources = list()
         for bus in self.nodes:
             if (
                 self.nodes[bus][VOLTAGE_LEVEL] < 69
@@ -274,29 +267,21 @@ class Model(nx.MultiGraph):
                 continue
             for neighbor in self[bus]:
                 if self.nodes[neighbor][VOLTAGE_LEVEL] >= 230:
-                    sources.add(bus)
-        return sorted(list(sources))
+                    sources.append(bus)
+
+        return sorted(sources)
 
     @cached_property
     def load_buses(self):
         buses = list()
         for bus in self.nodes:
-            if self.nodes[bus][AREA] > 8:
-                continue
             if self.nodes[bus][BUS_TYPE] not in PQ:
                 continue
             if self.nodes[bus][VOLTAGE_LEVEL] > 138:
                 continue
-            if any(
-                [
-                    True
-                    for neighbor in self[bus]
-                    if self.nodes[neighbor][VOLTAGE_LEVEL] > 138
-                ]
-            ):
-                continue
-            buses.append(f"{bus} - {self.nodes[bus][NAME]}")
-        return sorted(buses)
+            if self.nodes[bus]["PL"] > 0:
+                buses.append(bus)
+        return buses
 
     @cached_property
     def load_subs_dict(self):
@@ -355,7 +340,7 @@ class Model(nx.MultiGraph):
                 continue
         return sorted(filtered_paths, key=lambda path: self._path_weight(path))
 
-    def paths_from_bus_to_sources(self, bus):
+    def all_simple_edge_paths(self, bus):
         if bus not in self:
             raise nx.NodeNotFound("Source node %s not in graph" % bus)
         if bus in self.source_buses:
@@ -386,18 +371,25 @@ class Model(nx.MultiGraph):
                 stack.pop()
                 visited.pop()
 
+    def path_with_nodes(self, path : list):
+        new_path = list()
+        for u, v, j in path:
+            new_path.extend([u, (u, v, j)])        
+        return new_path
+
     def belonging_table(
         self, bus: int | None = None, *, paths: list | None = None
     ) -> pd.DataFrame:
         if bus is None and paths is None:
             raise ValueError("Bus and Paths can't be None at the same time!")
         if paths is None:
-            paths = self.paths_from_bus_to_sources(bus)
+            paths = self.all_simple_edge_paths(bus)
 
         columns = list()
         truth_table = []
 
         for path in paths:
+            path = self.path_with_nodes(path)
             for edge in path:
                 if edge not in columns:
                     columns.append(edge)
