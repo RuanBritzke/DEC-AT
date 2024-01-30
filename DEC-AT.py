@@ -8,6 +8,8 @@ from utils import functions
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
+# The class `App` is a subclass of `tk.Tk` and represents an application window with a specific title,
+# size, and icon.
 class App(tk.Tk):
     def __init__(self):
         super().__init__()

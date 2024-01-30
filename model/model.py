@@ -1,9 +1,9 @@
 import math
 import networkx as nx
 import pandas as pd
+import struct
 
 pd.options.mode.chained_assignment = None  # default='warn'
-pd.set_option('future.no_silent_downcasting', True)
 
 from io import StringIO
 from typing import Literal, Iterable
@@ -186,10 +186,10 @@ class Model(nx.MultiGraph):
             if not tap:
                 if new_model.nodes[origin][VOLTAGE_LEVEL] > 138:
                     line_type = "LT"
-                    name = f"LT {origin} - {destiny} ({circuit})"
+                    name = f"LT {new_model.nodes[origin][NAME]} - {new_model.nodes[origin][NAME]} ({circuit})"
                 else:
                     line_type = "LD"
-                    name = f"LD {origin} - {destiny} ({circuit})"
+                    name = f"LD {new_model.nodes[origin][NAME]} - {new_model.nodes[destiny][NAME]} ({circuit})"
                 weight = line_length(float(x), float(b))
                 (
                     temporary_failure_rate,
@@ -214,7 +214,6 @@ class Model(nx.MultiGraph):
                 )
                 continue
 
-            name = f"TR {new_model.nodes[destiny][NAME]} - ({new_model.nodes[destiny][NAME]}) ({circuit})"
             hv_lv = sorted(
                 [
                     new_model.nodes[origin][VOLTAGE_LEVEL],
@@ -222,6 +221,8 @@ class Model(nx.MultiGraph):
                 ],
                 reverse=True,
             )
+            
+            name = f"TR {new_model.nodes[destiny][NAME]} {"/".join([str(int(voltage)) for voltage in hv_lv])} ({circuit})"
             (
                 permanent_failure_rate,
                 replacement_time,
@@ -244,14 +245,30 @@ class Model(nx.MultiGraph):
             )
         return new_model
 
-    def get_edge_name(self, edge):
+    def get_element_name(self, element: int | tuple):
+        if isinstance(element, int):
+            return self.get_node_name(element)
+        if isinstance(element, tuple):
+            return self.get_edge_name(element)
+
+
+    def get_node_name(self, barra: int):
+        """### Parametros:
+            self -> modelo\n
+            barra -> número da barra
+        ###  Retorna:
+            nome da barra
+        """
+        return self.nodes[barra][NAME]
+
+    def get_edge_name(self, conexao: tuple):
         """### Parametros:
             self -> model\n
-            edge -> a ligação entre duas barras
+            conexao -> a conexao entre duas barras
         ### Retorna:
-            tipo da ligação (transformador, linha)
+            nome da conexao (transformador, linha)
         """
-        return self.edges[edge][NAME]
+        return self.edges[conexao][NAME]
 
     def get_edge_type(self, edge):
         return self.edges[edge][EDGE_TYPE]
@@ -268,7 +285,6 @@ class Model(nx.MultiGraph):
             for neighbor in self[bus]:
                 if self.nodes[neighbor][VOLTAGE_LEVEL] >= 230:
                     sources.append(bus)
-
         return sorted(sources)
 
     @cached_property
@@ -304,10 +320,22 @@ class Model(nx.MultiGraph):
     def get_bus_name(self, bus):
         return self.nodes[bus][NAME]
 
-    def path_weight(self, path, weight="weight"):
+    def path_weight(
+        self, path, weight="weight", consider_state: Literal["y", "n"] = "y"
+    ):
         if len(path) == 1:
             return 0
-        return sum([self.edges[edge][weight] for edge in path[1:]])
+        if consider_state == "n":
+            return sum([self.edges[edge][weight] for edge in path])
+        else:  # y
+            return sum(
+                [
+                    self.edges[edge][weight]
+                    if self.edges[edge]["STATE"] == NF
+                    else self.path_cutoff_distance
+                    for edge in path
+                ]
+            )
 
     def get_shortest_path(self, paths: list):
         min_weight = math.inf
@@ -340,56 +368,72 @@ class Model(nx.MultiGraph):
                 continue
         return sorted(filtered_paths, key=lambda path: self._path_weight(path))
 
-    def all_simple_edge_paths(self, bus):
+    def all_simple_edge_paths(
+        self, bus, consider_state: Literal["y", "n"] = "y", *, targets: Iterable = None
+    ):
         if bus not in self:
-            raise nx.NodeNotFound("Source node %s not in graph" % bus)
+            raise nx.NodeNotFound("Node %s not in graph" % bus)
         if bus in self.source_buses:
             return []
-
-        # é possível calcular a distancia maxima dependendo da carga da barra, e impedancia da linha:
-        # interessante para não ser necessário o estudo do fluxo de potência.
+        if targets is None:
+            targets = self.source_buses
 
         visited = [bus]
         stack = [iter(self.edges(bus, keys=True))]
-
         while stack:
             children = stack[-1]
             child = next(children, None)
             if child is None:
                 stack.pop()
                 visited.pop()
-            elif self.path_weight(visited[1:]) < self.path_cutoff_distance:
-                if child[1] in self.source_buses:
+            elif (
+                self.path_weight(visited[1:], consider_state=consider_state)
+                < self.path_cutoff_distance
+            ):
+                if child[1] in targets:
                     yield visited[1:] + [child]
                 elif child[1] not in [v[0] for v in visited[1:]]:
                     visited.append(child)
                     stack.append(iter(self.edges(child[1], keys=True)))
             else:  # self._path_weight() >= self.pathCutOff:
                 for u, v, k in [child] + list(children):
-                    if v in self.source_buses:
+                    if v in targets:
                         yield visited[1:] + [(u, v, k)]
                 stack.pop()
                 visited.pop()
 
-    def path_with_nodes(self, path : list):
-        new_path = list()
-        for u, v, j in path:
-            new_path.extend([u, (u, v, j)])        
-        return new_path
+    def add_nodes_to_path_lists(self, paths):
+        new_paths = []
+        new_path = []
+        for path in paths:
+            for edge in path:
+                new_path = new_path + [(edge[0]), (edge)]
+            new_path = new_path + [(path[-1][1])]
+            new_paths.append(new_path)
+            new_path = []
+        return new_paths
 
     def belonging_table(
-        self, bus: int | None = None, *, paths: list | None = None
+        self,
+        bus: int | None = None,
+        *,
+        paths: list | None = None,
+        consider_state: Literal["y", "n"] = "y",
+        targets: Iterable = None,
     ) -> pd.DataFrame:
         if bus is None and paths is None:
             raise ValueError("Bus and Paths can't be None at the same time!")
         if paths is None:
-            paths = self.all_simple_edge_paths(bus)
+            paths = self.add_nodes_to_path_lists(
+                self.all_simple_edge_paths(
+                    bus, consider_state=consider_state, targets=targets
+                )
+            )
 
         columns = list()
         truth_table = []
 
         for path in paths:
-            path = self.path_with_nodes(path)
             for edge in path:
                 if edge not in columns:
                     columns.append(edge)
@@ -399,13 +443,22 @@ class Model(nx.MultiGraph):
         df = pd.DataFrame(truth_table, columns=columns).fillna(value=False)
         return df
 
-    def failure_modes_table(self, bus=None, *, belonging_table: pd.DataFrame = None):
+    def failure_modes_table(
+        self,
+        bus=None,
+        *,
+        consider_state: Literal["y", "n"] = "y",
+        belonging_table: pd.DataFrame = None,
+        targets: Iterable = None,
+    ):
         if belonging_table is None and bus is None:
             raise ValueError(
                 "Both 'bus' and 'belonging_table' can't be None at the same time"
             )
         if belonging_table is None:
-            belonging_table = self.belonging_table(bus)
+            belonging_table = self.belonging_table(
+                bus, consider_state=consider_state, targets=targets
+            )
 
         failures = pd.DataFrame(columns=[FAILURE, ORDER])
         index = 0
@@ -414,8 +467,8 @@ class Model(nx.MultiGraph):
             order = len(columns)
             last_order = order - 1
             seen[order] = seen[order].union(seen[last_order])
-
-            if order == 0 or set(columns).intersection(seen[last_order]):
+            
+            if set(columns).intersection(seen[last_order]) or order == 0:
                 continue
 
             arrays = array(belonging_table[list(columns)])
@@ -423,8 +476,9 @@ class Model(nx.MultiGraph):
                 failures.loc[index] = [columns, len(columns)]
                 index += 1
                 seen[order] = seen[order].union(columns)
-            if len(seen[order]) == len(belonging_table.columns):
-                break
+                
+            # if len(seen[order]) == len(belonging_table.columns):
+            #     break
 
         return failures
 
@@ -441,7 +495,6 @@ class Model(nx.MultiGraph):
         elif len(failures) == 2:  # len(failures) == 2:
             failure_1 = failures[0]
             failure_2 = failures[1]
-
             permanent_failure_rate_1 = self.edges[failure_1][PERMANENT_FAILURE_RATE]
             permanent_failure_rate_2 = self.edges[failure_2][PERMANENT_FAILURE_RATE]
 

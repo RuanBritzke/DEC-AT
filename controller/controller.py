@@ -3,7 +3,6 @@ import os
 from model import *
 from view import *
 from utils import functions
-from numpy import nan
 ALL = "All"
 SE = "SE"
 BUS = "BUS"
@@ -106,20 +105,30 @@ class Controller:
 
         for row in df.itertuples():
             maxorder = (len(row[1:]) - 3) / 2
+            print(maxorder)
             index = row[0]
             failures = self.treat_failures(row[4 : int(4 + maxorder)])[0]
+            print(failures)
             df.at[index, "IND"] = self.model.unavailability(failures)
 
         self.view_tab_collection[entry] = df
         self.view.output.add_table(title=f"{entry}", view_table=df)
 
     def view_table(self, view_table: pd.DataFrame):
+        """_summary_
+        Args:
+            view_table (pd.DataFrame): _description_
+
+        Returns:
+            view_table: pd.DataFrame
+        """        
         for col in view_table.columns[3:]:  # iterate over all failure columns
             new_col = " ".join(col.split("_"))
 
             view_table[new_col] = view_table[col].map(
-                self.model.get_edge_name, na_action="ignore"
+                self.model.get_element_name, na_action="ignore"
             )
+        print(view_table)
         return view_table
 
     def calculate_params(
@@ -243,7 +252,7 @@ class Controller:
                 [new_df, pd.DataFrame(new_row, index=[0])], ignore_index=True
             )
         # new_df.drop(index, inplace=True)
-        new_df.replace(nan, None, inplace=True)
+        new_df.replace(np.nan, None, inplace=True)
         new_df.sort_values("N", axis="index", inplace=True)
         new_df.reset_index(drop=True, inplace=True)
         ic(new_df)
@@ -279,6 +288,7 @@ class Controller:
                 ),
             )
 
-    def treat_failures(self, failures):
+    def treat_failures(self, failures) -> tuple:
         failures = [fail for fail in failures if fail is not None]
         return failures, len(failures)
+
