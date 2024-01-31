@@ -28,7 +28,7 @@ class View:
 
     def my__post__init__(self):
         self.create_menu()
-        self.dec = DEC(self, self.options, self.controller)
+        self.input_options = InputOptions(self, self.options, self.controller)
         self.output = OutputNotebook(self.master, self.controller)
 
     def create_menu(self):
@@ -48,42 +48,36 @@ class View:
         )
 
 
-class DEC(tk.Frame):
+class InputOptions(tk.Frame):
     cbox_values = None
+    target_cbox_values = None
 
     def __init__(self, root, master, controller, **kwargs):
         self.root = root
         self.master = master
         self.controller = controller
         super().__init__(master, **kwargs)
-        tk.Label(self, text="Calcular DEC:").pack(anchor="nw")
+        self.create_target_selection_box()
         self.create_function_selection_buttons()
-        self.search_box()
+        self.create_origin_selection_box()
         self.pack(anchor="nw")
         ttk.Separator(master).pack(pady=5, fill="x", anchor="n")
 
-    def search_box(self):
+    def create_target_selection_box(self):
+        tk.Label(self, text="Selecione Barra Alvo").pack(anchor="nw")
         root = tk.Frame(self)
-        self.cboxvar = tk.StringVar()
-        self.cbox = ttk.Combobox(
+        self.target_cbox_var = tk.StringVar()
+        self.target_cbox = ttk.Combobox(
             root,
             state="disabled",
-            textvariable=self.cboxvar,
-            postcommand=self.update_cblist,
+            textvariable=self.target_cbox_var,
+            postcommand=self.update_target_cbox_list,
         )
-        self.cbox.grid(row=0, column=0, padx=5, pady=5)
-        self.search = tk.Button(root, text="Procurar", state="disabled")
-        self.search.grid(row=0, column=1, padx=5, pady=5)
+        self.target_cbox.grid(row=0, column=0, padx=5, pady=5)
         root.pack(fill="x", expand=True)
-        self.search.bind("<ButtonRelease-1>", self.startSearch)
-        self.cbox.set("Todas as SEs")
-        self.cbox.config(state="disabled")
 
-    def startSearch(self, *args):
-        search_value = self.cbox.get()
-        self.root.status_bar.set(f"Calculando Indisponibilidade para {search_value}")
-        self.controller.compute_unavailabilty(self.searchscope, entry=search_value)
-        self.root.status_bar.set("Pronto!")
+    def update_target_cbox_list(self):
+        self.target_cbox["values"] = ["-"] + self.controller.get_model_bars()
 
     def create_function_selection_buttons(self):
         labels = ["Todas SEs", "Por SE", "Por BARRA"]
@@ -103,22 +97,54 @@ class DEC(tk.Frame):
 
     def radio_button_selection(self, option: int):
         if option == 0:
-            self.cbox.config(state="disabled")
-            self.cbox_values = "Todas SEs"
-            self.cbox.set("Todas SEs")
+            self.origin_cbox.config(state="disabled")
+            self.origin_cbox_values = "Todas SEs"
+            self.origin_cbox.set("Todas SEs")
             self.searchscope = "Todas SEs"
 
         if option == 1:
-            self.cbox.config(state="normal")
-            self.cbox_values = self.controller.get_options_cbox_values(to=SUB)
-            self.cbox.set(self.cbox_values[0])
+            self.origin_cbox.config(state="normal")
+            self.origin_cbox_values = self.controller.get_options_cbox_values(to=SUB)
+            self.origin_cbox.set(self.origin_cbox_values[0])
             self.searchscope = "SUB"
 
         elif option == 2:
-            self.cbox.config(state="normal")
-            self.cbox_values = self.controller.get_options_cbox_values(to=BUS)
-            self.cbox.set(self.cbox_values[0])
+            self.origin_cbox.config(state="normal")
+            self.origin_cbox_values = self.controller.get_options_cbox_values(to=BUS)
+            self.origin_cbox.set(self.origin_cbox_values[0])
             self.searchscope = "BUS"
+
+    def create_origin_selection_box(self):
+        tk.Label(self, text="Calcular DEC:").pack(anchor="nw")
+        root = tk.Frame(self)
+        self.origin_cbox_var = tk.StringVar()
+        self.origin_cbox = ttk.Combobox(
+            root,
+            state="disabled",
+            textvariable=self.origin_cbox_var,
+            postcommand=self.update_origin_cbox_list,
+        )
+        self.origin_cbox.grid(row=0, column=0, padx=5, pady=5)
+        self.search = tk.Button(root, text="Procurar", state="disabled")
+        self.search.grid(row=0, column=1, padx=5, pady=5)
+        root.pack(fill="x", expand=True)
+        self.search.bind("<ButtonRelease-1>", self.start_search)
+        self.origin_cbox.set("Todas as SEs")
+        self.origin_cbox.config(state="disabled")
+
+    def update_origin_cbox_list(self):
+        self.origin_cbox["values"] = self.origin_cbox_values
+
+    def start_search(self, *args):
+        self.root.status_bar.set(
+            f"Calculando Indisponibilidade para {self.origin_cbox.get()}"
+        )
+        self.controller.compute_unavailabilty(
+            self.searchscope,
+            self.origin_cbox.get(),
+            int(self.target_cbox.get()),
+        )
+        self.root.status_bar.set("Pronto!")
 
     def enable(self, _state="normal"):
         def set_state(widget: tk.Widget):
@@ -131,9 +157,6 @@ class DEC(tk.Frame):
 
     def disable(self):
         self.enable("disable")
-
-    def update_cblist(self):
-        self.cbox["values"] = self.cbox_values
 
 
 class OutputNotebook:
@@ -161,7 +184,9 @@ class OutputNotebook:
             self.tab_collection[title] = (tab, ntabLabel)
 
         elif view_table.empty:
-            return
+            ntabLabel = tk.Label(tab, text="Nenhuma saída gerada", justify="left")
+            ntabLabel.pack(anchor="n", fill="x", expand=True)
+            self.tab_collection[title] = (tab, ntabLabel)
         else:
             visable_cols = (col for col in view_table.columns if "_FALHA_" not in col)
             model = TableModel(view_table[visable_cols])

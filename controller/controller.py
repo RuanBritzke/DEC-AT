@@ -3,6 +3,7 @@ import os
 from model import *
 from view import *
 from utils import functions
+
 ALL = "All"
 SE = "SE"
 BUS = "BUS"
@@ -29,7 +30,7 @@ class Controller:
             self.view.status_bar.set(
                 f"Rede importada: {len(self.model.nodes)} Barras e {len(self.model.edges)} conexões!"
             )
-            self.view.dec.enable()
+            self.view.input_options.enable()
 
     def get_options_cbox_values(self, to: Literal["SUB", "BUS"]):
         if to == SUB:
@@ -39,14 +40,63 @@ class Controller:
         else:
             return None
 
-    def processing_data(self, indexes: list, data: list, sub, buses: list):
+    def get_model_bars(self) -> list | None:
+        if hasattr(self, "model"):
+            return list(self.model.nodes)
+        return None
+
+    def generate_failure_table(
+        self,
+        scope: Literal["ALL", "SE", "SUB"],
+        entry: str | int | None = None,
+        target: str | int = None,
+    ):
+        indexes = list()
+        data = list()
+        if scope == ALL:
+            for kw, buses in self.model.load_subs_dict.items():
+                indexes, data = self.processing_data(indexes, data, kw, buses, target)
+
+        elif scope == SE:
+            buses = self.model.load_subs_dict[entry]
+            indexes, data = self.processing_data(indexes, data, entry, buses, target)
+
+        elif scope == BUS:
+            entry = int(entry)
+            sub = self.model.nodes[entry][SUB]
+
+            indexes, data = self.processing_data(indexes, data, sub, [entry], target)
+
+        ic(indexes)
+        ic(data)
+
+        mi = pd.MultiIndex.from_tuples(indexes, names=["SE", "BARRA", "N"])
+        df = pd.DataFrame(data, index=mi, columns=["FALHAS"])
+
+        if df.empty:
+            return df.reset_index()
+
+        maxFailureLen = df["FALHAS"].apply(len).max()
+        ic(df)
+        ic(maxFailureLen)
+
+        for i in range(maxFailureLen):
+            df[f"_FALHA_{i+1}"] = df["FALHAS"].apply(
+                lambda x: x[i] if len(x) > i else None
+            )
+        df.drop(columns="FALHAS", inplace=True)
+        flatDf = df.reset_index()
+        return flatDf
+
+    def processing_data(self, indexes: list, data: list, sub, buses: list, target=None):
         visited_failures = set()
         for bus in sorted(
             buses,
             key=lambda x: self.model.nodes[x][VOLTAGE_LEVEL],
             reverse=True,
         ):
-            failureModes = self.model.failure_modes_table(bus)
+            failureModes = self.model.failure_modes_table(bus, targets=[target])
+            ic(failureModes)
             for index, failures, _ in failureModes.itertuples():
                 if failures in visited_failures:
                     continue
@@ -55,64 +105,39 @@ class Controller:
                 visited_failures.add(failures)
         return indexes, data
 
-    def generate_failure_table(
-        self, scope: Literal["ALL", "SE", "SUB"], entry: str | int | None = None
+    def compute_unavailabilty(
+        self, scope, origin: str | None = None, target: str | None = None
     ):
-        indexes = list()
-        data = list()
-        if scope == ALL:
-            for kw, buses in self.model.load_subs_dict.items():
-                indexes, data = self.processing_data(indexes, data, kw, buses)
-
-        elif scope == SE:
-            buses = self.model.load_subs_dict[entry]
-            indexes, data = self.processing_data(indexes, data, entry, buses)
-
-        elif scope == BUS:
-            entry = int(entry)
-            sub = self.model.nodes[entry][SUB]
-            indexes, data = self.processing_data(indexes, data, sub, [entry])
-
-        mi = pd.MultiIndex.from_tuples(indexes, names=["SE", "BARRA", "N"])
-        df = pd.DataFrame(data, index=mi, columns=["FALHAS"])
-        maxFailureLen = df["FALHAS"].apply(len).max()
-
-        for i in range(maxFailureLen):
-            df[f"_FALHA_{i+1}"] = df["FALHAS"].apply(
-                lambda x: x[i] if len(x) > i else None
-            )
-        df.drop(columns="FALHAS", inplace=True)
-
-        flatDf = df.reset_index()
-        return flatDf
-
-    def compute_unavailabilty(self, scope, entry: str | None = None):
-        if entry in self.view_tab_collection.keys():
-            old_tab = self.view.output.tab_collection[entry][0]
+        ic(scope, origin, target)
+        if origin in self.view_tab_collection.keys():
+            old_tab = self.view.output.tab_collection[origin][0]
             self.view.output.notebook.select(old_tab)
             return
         if scope == "Todas SEs":
-            df = self.generate_failure_table(scope=ALL)
+            df = self.generate_failure_table(ALL, target)
         elif scope == "SUB":
-            df = self.generate_failure_table(scope=SE, entry=entry)
+            df = self.generate_failure_table(SE, origin, target)
         elif scope == "BUS":
-            entry = entry.split()[0]
-            df = self.generate_failure_table(scope=BUS, entry=entry)
+            origin = origin.split()[0]
+            df = self.generate_failure_table(BUS, origin, target)
         else:
-            raise ValueError(f"entry value: {repr(entry)} isn't expected")
+            raise ValueError(f"Origin value: {repr(origin)} isn't expected")
         df["N"] = df["N"] + 1
         df = self.view_table(df)
 
         for row in df.itertuples():
-            maxorder = (len(row[1:]) - 3) / 2
-            print(maxorder)
+            maxorder = (
+                len(row[1:]) - 3
+            ) / 2  # N SE BARRA ORDEM (FALHA_i -> n) (FALHA i -> n)
             index = row[0]
             failures = self.treat_failures(row[4 : int(4 + maxorder)])[0]
-            print(failures)
-            df.at[index, "IND"] = self.model.unavailability(failures)
+            try:
+                df.at[index, "IND"] = self.model.unavailability(failures)
+            except:
+                df.at[index, "IND"] = 0
 
-        self.view_tab_collection[entry] = df
-        self.view.output.add_table(title=f"{entry}", view_table=df)
+        self.view_tab_collection[origin] = df
+        self.view.output.add_table(title=f"{origin}", view_table=df)
 
     def view_table(self, view_table: pd.DataFrame):
         """_summary_
@@ -121,14 +146,13 @@ class Controller:
 
         Returns:
             view_table: pd.DataFrame
-        """        
+        """
         for col in view_table.columns[3:]:  # iterate over all failure columns
             new_col = " ".join(col.split("_"))
 
             view_table[new_col] = view_table[col].map(
                 self.model.get_element_name, na_action="ignore"
             )
-        print(view_table)
         return view_table
 
     def calculate_params(
@@ -291,4 +315,3 @@ class Controller:
     def treat_failures(self, failures) -> tuple:
         failures = [fail for fail in failures if fail is not None]
         return failures, len(failures)
-

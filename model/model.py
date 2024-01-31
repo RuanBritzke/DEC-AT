@@ -5,7 +5,7 @@ import struct
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
-from io import StringIO
+from icecream import ic
 from typing import Literal, Iterable
 from utils.functions import pwf_parser, line_length, power_set
 from utils.contants import *
@@ -459,7 +459,7 @@ class Model(nx.MultiGraph):
             belonging_table = self.belonging_table(
                 bus, consider_state=consider_state, targets=targets
             )
-
+        ic(belonging_table)
         failures = pd.DataFrame(columns=[FAILURE, ORDER])
         index = 0
         seen = defaultdict(set)
@@ -582,6 +582,7 @@ class Model(nx.MultiGraph):
             return unavailability_time
 
     def unavailability(self, failures: Iterable) -> float:
+        ic(failures)
         return self.adjusted_unavailability(
             failures=failures, beta=1, ma=0, mc=0, md=0, ta=0, tc=0
         )
