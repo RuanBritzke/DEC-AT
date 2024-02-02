@@ -19,6 +19,9 @@ class View:
         self.status_bar.set("Importe uma rede!")
         self.startup_alert()
 
+    def alert(self, message):
+        messagebox.showerror("Erro!", message)
+
     def startup_alert(self):
         messagebox.showinfo("Olá", "Para iniciar o estudo, importe um arquivo PWF!")
 
@@ -32,13 +35,18 @@ class View:
         self.output = OutputNotebook(self.master, self.controller)
 
     def create_menu(self):
-        menubar = tk.Menu(self.master, tearoff=False)
-        self.master.config(menu=menubar)
-        menubar.add_command(
-            label="Importar",
-            command=self.controller.import_file,
+        menu_bar = tk.Menu(self.master, tearoff=False)
+        import_menu = tk.Menu(menu_bar, tearoff=False)
+        import_menu.add_command(
+            label="Dados Barras", command=self.controller.import_bus_data
         )
-        menubar.add_command(label="Salvar")
+        import_menu.add_command(
+            label="Dados Conexoes", command=self.controller.import_edge_data
+        )
+        import_menu.add_separator()
+        import_menu.add_command(label="PWF", command=self.controller.import_pwf_file)
+        menu_bar.add_cascade(label="Importar", menu=import_menu)
+        self.master.config(menu=menu_bar)
 
     def askfilewindow(self):
         return filedialog.askopenfilename(
@@ -92,6 +100,7 @@ class InputOptions(tk.Frame):
                 command=lambda: self.radio_button_selection(self.radiovar.get()),
             )
             self.radio_btn.pack(anchor="nw")
+        self.origin_cbox_values = "Todas SEs"
         self.radiovar.set(0)
         self.searchscope = "Todas SEs"
 
@@ -285,12 +294,10 @@ class FailureTreatmentFrame(tk.Frame):
     def update_failures_list(self):
         substring = "FALHA "
         fail_cols = [col for col in self.view_table.columns if substring in col]
-        self.failure_selection_cbox["values"] = ic(
-            (
-                self.view_table[fail_cols]
-                .apply(lambda row: " <-> ".join(filter(None, row)), axis=1)
-                .tolist()
-            )
+        self.failure_selection_cbox["values"] = (
+            self.view_table[fail_cols]
+            .apply(lambda row: " <-> ".join(filter(None, row)), axis=1)
+            .tolist()
         )
 
     def failure_selected(self, *args):
@@ -324,41 +331,41 @@ class FailureTreatmentFrame(tk.Frame):
                         master=self.parameters_input_frame, failure_type=DLIN
                     )
             if order == 2:
-                self.create_failure_separator(master=self.parameters_input_frame)
+                # self.create_failure_separator(master=self.parameters_input_frame)
                 self.topology_selected(
                     master=self.parameters_input_frame, failure_type=DLIN
                 )
             self.parameters_input_frame.pack(anchor="center", fill="both", expand=True)
 
-    def create_failure_separator(self, *, master):
-        failure_separator = tk.Frame(master)
-        failure_separator.columnconfigure(0, weight=8, minsize=80)
-        failure_separator.columnconfigure(1, weight=1, minsize=35)
-        failure_separator.pack(anchor="ne", fill="both", expand=True)
+    # def create_failure_separator(self, *, master):
+    #     failure_separator = tk.Frame(master)
+    #     failure_separator.columnconfigure(0, weight=8, minsize=80)
+    #     failure_separator.columnconfigure(1, weight=1, minsize=35)
+    #     failure_separator.pack(anchor="ne", fill="both", expand=True)
 
-        failure_separator_description = tk.Label(
-            failure_separator,
-            text="Caso um elemento da falha não suportar toda a carga, separe a falha.",
-            anchor="w",
-            justify="left",
-        )
-        failure_separator_description.grid(
-            row=0, column=0, padx=5, pady=5, sticky="nsew"
-        )
+    #     failure_separator_description = tk.Label(
+    #         failure_separator,
+    #         text="Caso um elemento da falha não suportar toda a carga, separe a falha.",
+    #         anchor="w",
+    #         justify="left",
+    #     )
+    #     failure_separator_description.grid(
+    #         row=0, column=0, padx=5, pady=5, sticky="nsew"
+    #     )
 
-        failure_separator_button = tk.Button(
-            failure_separator,
-            text="Separar Falha",
-            command=self.send_separate_failure_command,
-        )
-        failure_separator_button.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
+    #     failure_separator_button = tk.Button(
+    #         failure_separator,
+    #         text="Separar Falha",
+    #         command=self.send_separate_failure_command,
+    #     )
+    #     failure_separator_button.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
 
-    def send_separate_failure_command(self):
-        self.controller.separete_failures(
-            self.arguments["entry"],
-            self.arguments["index"],
-            len(self.arguments["failures"]),
-        )
+    # def send_separate_failure_command(self):
+    #     self.controller.separete_failures(
+    #         self.arguments["entry"],
+    #         self.arguments["index"],
+    #         len(self.arguments["failures"]),
+    #     )
 
     # Seletor de topologia de transformador
     def create_xfmr_topology_frame(self, master):

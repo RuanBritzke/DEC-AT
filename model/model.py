@@ -9,10 +9,17 @@ from icecream import ic
 from typing import Literal, Iterable
 from utils.functions import pwf_parser, line_length, power_set
 from utils.contants import *
+from utils.datatypes import StochasticParams
 from collections import defaultdict
 from functools import cached_property
 from numpy import array, add, prod
 from os import PathLike
+
+FR_P = "FR_P"  # Permanent Failure Rate
+RP = "RP"  # Repair time of a permanently failed element of the grid
+FR_T = "FR_T"  # Temporary Failure Rate
+RT = "RT"  # Repair time of a termporaly failed element of the grid
+LTT = "LTT"  # Load Transfer Time
 
 
 def get_tower_type(name):
@@ -40,7 +47,7 @@ def get_xfmr_rates_and_times(vp, vs):
 
 
 class Model(nx.MultiGraph):
-    max_order = 3
+    max_order = 2
     path_cutoff_distance = 200
 
     def __init__(self, *args, **kwargs):
@@ -118,7 +125,7 @@ class Model(nx.MultiGraph):
 
             name: str
             name = name.replace("/", "-")
-
+            name = name.replace("_", "-")
             new_model.add_node(
                 cod,
                 NAME=name,
@@ -207,9 +214,9 @@ class Model(nx.MultiGraph):
                     STATE=state,
                     PROP=get_tower_type(name),
                     EDGE_TYPE=line_type,
-                    PERMANENT_FAILURE_RATE=0,
-                    REPLACEMENT_TIME=0,
-                    TEMPORARY_FAILURE_RATE=temporary_failure_rate * weight,
+                    FR_P=0,
+                    RP=0,
+                    FR_T=temporary_failure_rate * weight,
                     REPAIR_TIME=repair_time,
                 )
                 continue
@@ -221,11 +228,12 @@ class Model(nx.MultiGraph):
                 ],
                 reverse=True,
             )
-            
-            name = f"TR {new_model.nodes[destiny][NAME]} {"/".join([str(int(voltage)) for voltage in hv_lv])} ({circuit})"
+            voltage = "/".join([str(int(voltage)) for voltage in hv_lv])
+
+            name = f"TR {new_model.nodes[destiny][SUB]} {voltage} ({circuit})"
             (
                 permanent_failure_rate,
-                replacement_time,
+                rp,
                 temporary_failure_rate,
             ) = get_xfmr_rates_and_times(*hv_lv)
 
@@ -238,9 +246,9 @@ class Model(nx.MultiGraph):
                 STATE=state,
                 EDGE_TYPE="TR",
                 PROP="{}/{} kV".format(*hv_lv),
-                PERMANENT_FAILURE_RATE=permanent_failure_rate,
-                REPLACEMENT_TIME=replacement_time,
-                TEMPORARY_FAILURE_RATE=temporary_failure_rate,
+                FR_P=permanent_failure_rate,
+                RP=rp,
+                FR_T=temporary_failure_rate,
                 REPAIR_TIME=5,
             )
         return new_model
@@ -250,7 +258,6 @@ class Model(nx.MultiGraph):
             return self.get_node_name(element)
         if isinstance(element, tuple):
             return self.get_edge_name(element)
-
 
     def get_node_name(self, barra: int):
         """### Parametros:
@@ -330,9 +337,11 @@ class Model(nx.MultiGraph):
         else:  # y
             return sum(
                 [
-                    self.edges[edge][weight]
-                    if self.edges[edge]["STATE"] == NF
-                    else self.path_cutoff_distance
+                    (
+                        self.edges[edge][weight]
+                        if self.edges[edge]["STATE"] == NF
+                        else self.path_cutoff_distance
+                    )
                     for edge in path
                 ]
             )
@@ -459,7 +468,6 @@ class Model(nx.MultiGraph):
             belonging_table = self.belonging_table(
                 bus, consider_state=consider_state, targets=targets
             )
-        ic(belonging_table)
         failures = pd.DataFrame(columns=[FAILURE, ORDER])
         index = 0
         seen = defaultdict(set)
@@ -467,7 +475,7 @@ class Model(nx.MultiGraph):
             order = len(columns)
             last_order = order - 1
             seen[order] = seen[order].union(seen[last_order])
-            
+
             if set(columns).intersection(seen[last_order]) or order == 0:
                 continue
 
@@ -476,209 +484,212 @@ class Model(nx.MultiGraph):
                 failures.loc[index] = [columns, len(columns)]
                 index += 1
                 seen[order] = seen[order].union(columns)
-                
+
             # if len(seen[order]) == len(belonging_table.columns):
             #     break
 
         return failures
 
-    def time_and_probabilistic_params_per_failure(self, failures: Iterable) -> tuple:
+    def get_element_stochastic_param(
+        self, element: tuple | int, param: Literal["FR_P", "FR_T", "RP", "RT"]
+    ):
+        if isinstance(element, int):  # element is a bus
+            if hasattr(self, "bus_data"):
+                if element in self.bus_data:
+                    return self.bus_data[element][param]
+            return self.nodes[element][param]
+        if hasattr(self, "edge_data"):
+            if element in self.edge_data:
+                return self.edge_data[element][param]
+            u, v, k = element
+            if (v, u, k) in self.edge_data:
+                return self.edge_data[(v, u, k)][param]
+        return self.edges[element][param]
+
+    def get_element_stochastic_params(self, failures: Iterable[int | tuple]) -> tuple:
+        stochastic_params_list = list()
+        for failure in failures:
+            stochastic_params = StochasticParams(
+                self.get_element_stochastic_param(failure, FR_P),
+                self.get_element_stochastic_param(failure, RP),
+                self.get_element_stochastic_param(failure, FR_T),
+                self.get_element_stochastic_param(failure, RT),
+            )
+            stochastic_params_list.extend(stochastic_params)
+        return stochastic_params_list
+
+    def unavailability(self, failures) -> float:
         if len(failures) == 1:
-            failure = failures[0]
-            return (
-                self.edges[failure][PERMANENT_FAILURE_RATE],
-                self.edges[failure][TEMPORARY_FAILURE_RATE],
-                self.edges[failure][REPLACEMENT_TIME],
-                self.edges[failure][REPAIR_TIME],
+            return self.unavailability_p(failures[0]) + self.unavailability_t(
+                failures[0]
             )
+        return self.overlaping_unavailabilty_pp(
+            failures
+        ) + self.overlaping_unavailabilty_pt(failures)
 
-        elif len(failures) == 2:  # len(failures) == 2:
-            failure_1 = failures[0]
-            failure_2 = failures[1]
-            permanent_failure_rate_1 = self.edges[failure_1][PERMANENT_FAILURE_RATE]
-            permanent_failure_rate_2 = self.edges[failure_2][PERMANENT_FAILURE_RATE]
+    def unavailability_p(self, failure) -> float:
+        """Calculate the permanent unavailability caused by a permanten failure on a component of the grid.
 
-            temporary_failure_rate_1 = self.edges[failure_1][TEMPORARY_FAILURE_RATE]
-            temporary_failure_rate_2 = self.edges[failure_2][TEMPORARY_FAILURE_RATE]
+        Args:
+            failure (int | tuple): element of the grid, that failed
 
-            replacement_time_1 = self.edges[failure_1][REPLACEMENT_TIME]
-            repair_time_1 = self.edges[failure_1][REPAIR_TIME]
+        Returns:
+            float: resulting unavailabilty due to permanent failure.
+        """
+        permanent_failure_rate = self.get_element_stochastic_param(failure, FR_P)
+        repair_time = self.get_element_stochastic_param(failure, RP)
+        return permanent_failure_rate * repair_time
 
-            replacement_time_2 = self.edges[failure_2][REPLACEMENT_TIME]
-            repair_time_2 = self.edges[failure_2][REPAIR_TIME]
+    def unavailability_t(self, failure) -> float:
+        """Calculate the unavailability due to the failure of a a single component of the grid due to
 
-            return (
-                permanent_failure_rate_1,
-                temporary_failure_rate_1,
-                replacement_time_1,
-                repair_time_1,
-                permanent_failure_rate_2,
-                temporary_failure_rate_2,
-                replacement_time_2,
-                repair_time_2,
-            )
-        else:
-            return
+        Args:
+            failure (int | tuple): element of the grid, that failed
 
-    def adjusted_unavailability(
-        self,
-        *,
-        failures: Iterable,
-        beta=1,
-        ma: float = 0,
-        mc: float = 0,
-        md: float = 0,
-        ta: float = 0,
-        tc: float = 0,
-    ):
-        order = len(failures)
+        Returns:
+            float: resulting unavailabilty due to permanent failure.
+        """
+        frt = self.get_element_stochastic_param(failure, FR_T)
+        rt = self.get_element_stochastic_param(failure, RT)
+        return frt * rt
 
-        if order == 1:
-            (
-                permanent_failure_rate,
-                temporary_failure_rate,
-                replacement_time,
-                repair_time,
-            ) = self.time_and_probabilistic_params_per_failure(failures)
-            unavailability_time = (
-                beta * permanent_failure_rate * replacement_time
-                + beta * temporary_failure_rate * repair_time
-            ) * (1 - ma - mc - md) + (
-                permanent_failure_rate + temporary_failure_rate
-            ) * (
-                ta * ma + tc * mc
-            )
-            return unavailability_time
+    def overlaping_unavailabilty_pp(self, failures) -> float:
+        """Calculate the overlaping unavailability of two components failing permanently at the same occurrance.
 
-        elif order == 2:
-            (
-                permanent_failure_rate_1,
-                temporary_failure_rate_1,
-                replacement_time_1,
-                repair_time_1,
-                permanent_failure_rate_2,
-                temporary_failure_rate_2,
-                replacement_time_2,
-                repair_time_2,
-            ) = self.time_and_probabilistic_params_per_failure(failures)
-            unavailability_time = (
-                (
-                    beta
-                    * permanent_failure_rate_1
-                    * temporary_failure_rate_2
-                    * replacement_time_1
-                    * repair_time_2
-                    + beta
-                    * permanent_failure_rate_2
-                    * temporary_failure_rate_1
-                    * replacement_time_2
-                    * repair_time_1
-                )
-                * (1 - ma - mc - md)
-                + (permanent_failure_rate_1 * permanent_failure_rate_2)
-                * (ma + mc)
-                * (ta + tc) ** 2
-            ) / 8760
-            return unavailability_time
+        Args:
+            failrues (list): list of failures
 
-    def unavailability(self, failures: Iterable) -> float:
-        ic(failures)
-        return self.adjusted_unavailability(
-            failures=failures, beta=1, ma=0, mc=0, md=0, ta=0, tc=0
-        )
+        Returns:
+            float: resulting unavailability due to failure.
+        """
+        frp = list()
+        rp = list()
+        for failure in failures:
+            frp.append(self.get_element_stochastic_param(failure, FR_P))
+            rp.append(self.get_element_stochastic_param(failure, RP))
+        return prod(frp) * prod(rp) / 8760
 
-    def calculate_chi(
-        self,
-        *,
-        hit_consumers: int,
-        failures: Iterable,
-        beta=1,
-        ma: float = 0,
-        mc: float = 0,
-        md: float = 0,
-        ta: float = 0,
-        tc: float = 0,
-    ):
-        return hit_consumers * self.adjusted_unavailability(
-            failures=failures, beta=beta, ma=ma, mc=mc, md=md, ta=ta, tc=tc
-        )
+    def overlaping_unavailabilty_pt(self, failures) -> float:
+        """Calculate the overlaping unavailability of a permanent failure overlap a temporary failure.
 
-    def calculate_dec(
-        self,
-        *,
-        group_consumers: int,
-        hit_consumers: int,
-        failures: Iterable,
-        beta=1,
-        ma: float = 0,
-        mc: float = 0,
-        md: float = 0,
-        ta: float = 0,
-        tc: float = 0,
-    ):
-        return (
-            self.calculate_chi(
-                hit_consumers=hit_consumers,
-                failures=failures,
-                beta=beta,
-                ma=ma,
-                mc=mc,
-                md=md,
-                ta=ta,
-                tc=tc,
-            )
-            / group_consumers
-        )
+        Args:
+            failrues (list): list of failures
 
-    def calculate_fic(self, *, hit_consumers: int, failures: Iterable, md: float = 0):
-        order = len(failures)
-        if order == 1:
-            (
-                permanent_failure_rate,
-                temporary_failure_rate,
-                _,
-                _,
-            ) = self.time_and_probabilistic_params_per_failure(failures)
-            return (
-                hit_consumers
-                * (permanent_failure_rate + temporary_failure_rate)
-                * (1 - md)
-            )
-        elif order == 2:
-            (
-                permanent_failure_rate_1,
-                temporary_failure_rate_1,
-                repair_time_1,
-                replacement_time_1,
-                permanent_failure_rate_2,
-                temporary_failure_rate_2,
-                repair_time_2,
-                replacement_time_2,
-            ) = self.time_and_probabilistic_params_per_failure(failures)
-            return (
-                hit_consumers
-                * (
-                    permanent_failure_rate_1
-                    * temporary_failure_rate_2
-                    * (replacement_time_1 + repair_time_2)
-                    + permanent_failure_rate_2
-                    * temporary_failure_rate_1
-                    * (repair_time_1 + replacement_time_2)
-                )
-                * (1 - md)
-                / 8760
-            )
+        Returns:
+            float: resulting unavailability due to failure.
+        """
+        frp = list()
+        rp = list()
+        frt = list()
+        rt = list()
+        for failure in failures:
+            frp.append(self.get_element_stochastic_param(failure, FR_P))
+            rp.append(self.get_element_stochastic_param(failure, RP))
+            frt.append(self.get_element_stochastic_param(failure, FR_T))
+            rt.append(self.get_element_stochastic_param(failure, RT))
 
-    def calculate_fec(
-        self,
-        *,
-        group_consumers: int,
-        hit_consumers: int,
-        failures: Iterable,
-        md: float,
-        **kwargs,
-    ):
-        return (
-            self.calculate_fic(hit_consumers=hit_consumers, failures=failures, md=md)
-            / group_consumers
-        )
+        return (frp[0] * frt[1] * rp[0] * rt[1] + frp[1] * frt[0] * rp[1] * rt[0]) / 8760
+
+
+#   def adjusted_unavailability(
+#     self,
+#     *,
+#     failures: Iterable,
+#     beta=1,
+#     ma: float = 0,
+#     mc: float = 0,
+#     md: float = 0,
+#     ta: float = 0,
+#     tc: float = 0,
+# ):
+#     order = len(failures)
+#     if order == 1:
+#         (
+#             permanent_failure_rate,
+#             temporary_failure_rate,
+#             RP,
+#             repair_time,
+#         ) = self.get_element_stochastic_params(failures)
+#         unavailability_time = (
+#             beta * permanent_failure_rate * RP
+#             + beta * temporary_failure_rate * repair_time
+#         ) * (1 - ma - mc - md) + (
+#             permanent_failure_rate + temporary_failure_rate
+#         ) * (
+#             ta * ma + tc * mc
+#         )
+#         return unavailability_time
+
+#     elif order == 2:
+#         (
+#             permanent_failure_rate_1,
+#             temporary_failure_rate_1,
+#             R_1,
+#             repair_time_1,
+#             permanent_failure_rate_2,
+#             temporary_failure_rate_2,
+#             R_2,
+#             repair_time_2,
+#         ) = self.get_element_stochastic_params(failures)
+#         unavailability_time = (
+#             (
+#                 beta
+#                 * permanent_failure_rate_1
+#                 * temporary_failure_rate_2
+#                 * R_1
+#                 * repair_time_2
+#                 + beta
+#                 * permanent_failure_rate_2
+#                 * temporary_failure_rate_1
+#                 * R_2
+#                 * repair_time_1
+#             )
+#             * (1 - ma - mc - md)
+#             + (permanent_failure_rate_1 * permanent_failure_rate_2)
+#             * (ma + mc)
+#             * (ta + tc) ** 2
+#         ) / 8760
+#         return unavailability_time
+
+# def calculate_chi(
+#     self,
+#     *,
+#     hit_consumers: int,
+#     failures: Iterable,
+#     beta=1,
+#     ma: float = 0,
+#     mc: float = 0,
+#     md: float = 0,
+#     ta: float = 0,
+#     tc: float = 0,
+# ):
+#     return hit_consumers * self.adjusted_unavailability(
+#         failures=failures, beta=beta, ma=ma, mc=mc, md=md, ta=ta, tc=tc
+#     )
+
+# def calculate_dec(
+#     self,
+#     *,
+#     group_consumers: int,
+#     hit_consumers: int,
+#     failures: Iterable,
+#     beta=1,
+#     ma: float = 0,
+#     mc: float = 0,
+#     md: float = 0,
+#     ta: float = 0,
+#     tc: float = 0,
+# ):
+#     return (
+#         self.calculate_chi(
+#             hit_consumers=hit_consumers,
+#             failures=failures,
+#             beta=beta,
+#             ma=ma,
+#             mc=mc,
+#             md=md,
+#             ta=ta,
+#             tc=tc,
+#         )
+#         / group_consumers
+#     )

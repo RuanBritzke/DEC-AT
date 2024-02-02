@@ -18,19 +18,43 @@ class Controller:
 
         self.view.set_controller(self)
 
-    def import_file(self):
+    def import_pwf_file(self):
         file = functions.resource_path(self.view.askfilewindow())
         file_ext = os.path.splitext(file)[-1]
         if file_ext != ".PWF":
             self.view.status_bar.set(f'FALHA! Extensão não aceita: "{file_ext}"')
         else:
-            self.view.status_bar.set(f'Importando aquivo de: "{file}"')
+            self.view.status_bar.set(f'Importando redes de: "{file}"')
 
             self.model = Model.from_pwf(file)
             self.view.status_bar.set(
                 f"Rede importada: {len(self.model.nodes)} Barras e {len(self.model.edges)} conexões!"
             )
             self.view.input_options.enable()
+
+    def import_bus_data(self):
+        if not hasattr(self, "model"):
+            self.view.alert("Primeiro importe um arquivo PWF!")
+            return
+        file = functions.resource_path(self.view.askfilewindow())
+        file_ext = os.path.splitext(file)[-1]
+        if file_ext != ".csv":
+            self.view.alert(f'FALHA! Extensão não aceita: "{file_ext}"')
+        else:
+            self.view.status_bar.set(f'Importando dados de: "{file}"')
+            self.model.bus_data = bus_data(file)
+
+    def import_edge_data(self):
+        if not hasattr(self, "model"):
+            self.view.alert("Primeiro importe um arquivo PWF!")
+            return
+        file = functions.resource_path(self.view.askfilewindow())
+        file_ext = os.path.splitext(file)[-1]
+        if file_ext != ".csv":
+            self.view.alert(f'FALHA! Extensão não aceita: "{file_ext}"')
+        else:
+            self.view.status_bar.set(f'Importando dados de: "{file}"')
+            self.model.edge_data = edge_data(file)
 
     def get_options_cbox_values(self, to: Literal["SUB", "BUS"]):
         if to == SUB:
@@ -52,34 +76,27 @@ class Controller:
         target: str | int = None,
     ):
         indexes = list()
-        data = list()
         if scope == ALL:
             for kw, buses in self.model.load_subs_dict.items():
-                indexes, data = self.processing_data(indexes, data, kw, buses, target)
+                indexes, data = self.processing_data(indexes, kw, buses, target)
 
         elif scope == SE:
             buses = self.model.load_subs_dict[entry]
-            indexes, data = self.processing_data(indexes, data, entry, buses, target)
+            indexes, data = self.processing_data(indexes, entry, buses, target)
 
         elif scope == BUS:
             entry = int(entry)
             sub = self.model.nodes[entry][SUB]
 
-            indexes, data = self.processing_data(indexes, data, sub, [entry], target)
+            indexes, data = self.processing_data(indexes, sub, [entry], target)
 
-        ic(indexes)
-        ic(data)
-
-        mi = pd.MultiIndex.from_tuples(indexes, names=["SE", "BARRA", "N"])
+        mi = pd.MultiIndex.from_tuples(indexes, names=["SE", "BARRA DE CARGA", "N"])
         df = pd.DataFrame(data, index=mi, columns=["FALHAS"])
 
         if df.empty:
             return df.reset_index()
 
         maxFailureLen = df["FALHAS"].apply(len).max()
-        ic(df)
-        ic(maxFailureLen)
-
         for i in range(maxFailureLen):
             df[f"_FALHA_{i+1}"] = df["FALHAS"].apply(
                 lambda x: x[i] if len(x) > i else None
@@ -88,15 +105,15 @@ class Controller:
         flatDf = df.reset_index()
         return flatDf
 
-    def processing_data(self, indexes: list, data: list, sub, buses: list, target=None):
+    def processing_data(self, indexes: list, sub, buses: list, target=None):
         visited_failures = set()
+        data = list()
         for bus in sorted(
             buses,
             key=lambda x: self.model.nodes[x][VOLTAGE_LEVEL],
             reverse=True,
         ):
             failureModes = self.model.failure_modes_table(bus, targets=[target])
-            ic(failureModes)
             for index, failures, _ in failureModes.itertuples():
                 if failures in visited_failures:
                     continue
@@ -106,9 +123,8 @@ class Controller:
         return indexes, data
 
     def compute_unavailabilty(
-        self, scope, origin: str | None = None, target: str | None = None
+        self, scope, origin: int | str | None = None, target: str | None = None
     ):
-        ic(scope, origin, target)
         if origin in self.view_tab_collection.keys():
             old_tab = self.view.output.tab_collection[origin][0]
             self.view.output.notebook.select(old_tab)
@@ -118,24 +134,19 @@ class Controller:
         elif scope == "SUB":
             df = self.generate_failure_table(SE, origin, target)
         elif scope == "BUS":
-            origin = origin.split()[0]
-            df = self.generate_failure_table(BUS, origin, target)
+            df = self.generate_failure_table(BUS, int(origin), target)
         else:
             raise ValueError(f"Origin value: {repr(origin)} isn't expected")
-        df["N"] = df["N"] + 1
         df = self.view_table(df)
-
         for row in df.itertuples():
             maxorder = (
-                len(row[1:]) - 3
-            ) / 2  # N SE BARRA ORDEM (FALHA_i -> n) (FALHA i -> n)
+                len(row[1:]) - 2
+            ) / 2  # SE BARRA ORDEM (FALHA_i -> n) (FALHA i -> n)
             index = row[0]
-            failures = self.treat_failures(row[4 : int(4 + maxorder)])[0]
-            try:
-                df.at[index, "IND"] = self.model.unavailability(failures)
-            except:
-                df.at[index, "IND"] = 0
-
+            failures = self.treat_failures(row[3 : int(3 + maxorder)])
+            U = self.model.unavailability(failures)
+            df.at[index, "U"] = U
+        df = df.loc[df["U"] != 0]
         self.view_tab_collection[origin] = df
         self.view.output.add_table(title=f"{origin}", view_table=df)
 
@@ -153,6 +164,7 @@ class Controller:
             view_table[new_col] = view_table[col].map(
                 self.model.get_element_name, na_action="ignore"
             )
+        view_table.drop(["N"], axis="columns", inplace=True)
         return view_table
 
     def calculate_params(
@@ -256,41 +268,40 @@ class Controller:
     def del_tab(self, entry):
         del self.view_tab_collection[entry]
 
-    def separete_failures(self, entry, index, order):
-        new_df: pd.DataFrame = self.view_tab_collection[entry].copy()
-        self.del_tab(entry)
-        ic(new_df)
+    # def separete_failures(self, entry, index, order):
+    #     new_df: pd.DataFrame = self.view_tab_collection[entry].copy()
+    #     self.del_tab(entry)
+    #     new_df.loc[new_df.index > index, "N"] += order - 1
+    #     failure_cols = [col for col in new_df.columns if col.startswith("_FALHA_")]
+    #     new_df = new_df[["SE", "BARRA", "N"] + failure_cols]
+    #     failure_elements_list = new_df.loc[index, failure_cols].to_list()
+    #     for i, failure_element in enumerate(failure_elements_list):
+    #         new_row = {
+    #             "SE": [new_df.at[index, "SE"]],
+    #             "BARRA": [new_df.at[index, "BARRA"]],
+    #             "N": [new_df.at[index, "N"] + i + 1],
+    #             "_FALHA_1": [failure_element],
+    #         }
+    #         new_df = pd.concat(
+    #             [new_df, pd.DataFrame(new_row, index=[0])], ignore_index=True
+    #         )
+    #     # new_df.drop(index, inplace=True)
+    #     new_df.replace(np.nan, None, inplace=True)
+    #     new_df.sort_values("N", axis="index", inplace=True)
+    #     new_df.reset_index(drop=True, inplace=True)
+    #     new_df = self.view_table(new_df)
+    #     for row in new_df.itertuples():
+    #         maxorder = (len(row[1:]) - 3) / 2
+    #         index = row[0]
+    #         failures, order = self.treat_failures(row[4 : int(4 + maxorder)])
+    #         if order == 1:
+    #             new_df.at[index, "Up"] = self.model.unavailability_p(*failures)
+    #             new_df.at[index, "Ut"] = self.model.unavailability_t(*failures)
 
-        new_df.loc[new_df.index > index, "N"] += order - 1
-        failure_cols = [col for col in new_df.columns if col.startswith("_FALHA_")]
-        new_df = new_df[["SE", "BARRA", "N"] + failure_cols]
-        failure_elements_list = new_df.loc[index, failure_cols].to_list()
-        for i, failure_element in enumerate(failure_elements_list):
-            new_row = {
-                "SE": [new_df.at[index, "SE"]],
-                "BARRA": [new_df.at[index, "BARRA"]],
-                "N": [new_df.at[index, "N"] + i + 1],
-                "_FALHA_1": [failure_element],
-            }
-            new_df = pd.concat(
-                [new_df, pd.DataFrame(new_row, index=[0])], ignore_index=True
-            )
-        # new_df.drop(index, inplace=True)
-        new_df.replace(np.nan, None, inplace=True)
-        new_df.sort_values("N", axis="index", inplace=True)
-        new_df.reset_index(drop=True, inplace=True)
-        ic(new_df)
-        new_df = self.view_table(new_df)
-        for row in new_df.itertuples():
-            maxorder = (len(row[1:]) - 3) / 2
-            index = row[0]
-            failures = self.treat_failures(row[4 : int(4 + maxorder)])[0]
-            new_df.at[index, "IND"] = self.model.unavailability(failures)
-
-        self.view_tab_collection[entry] = new_df
-        self.view.output.update_table(self.view.output.tab_collection[entry][1], new_df)
-        self.view.output
-        return
+    #     self.view_tab_collection[entry] = new_df
+    #     self.view.output.update_table(self.view.output.tab_collection[entry][1], new_df)
+    #     self.view.output
+    #     return
 
     def get_failure_atts(self, entry, index):
         df: pd.DataFrame = self.view_tab_collection[entry]
@@ -298,20 +309,21 @@ class Controller:
         failures = df[failures_columns].iloc[index].to_list()
         failures, order = self.treat_failures(failures)
         if order == 1:
-            edge = failures[0]
-            return failures, order, self.model.edges[edge][EDGE_TYPE]
+            failure = failures[0]
+            if isinstance(failure, int):
+                return failures, order, self.model.nodes[failure][BUS_TYPE]
+            return failures, order, self.model.edges[failure][EDGE_TYPE]
         if order == 2:
+            failure_atts = list()
             edge1 = failures[0]
             edge2 = failures[1]
-            return (
-                failures,
-                order,
-                (
-                    self.model.edges[edge1][EDGE_TYPE],
-                    self.model.edges[edge2][EDGE_TYPE],
-                ),
-            )
+            for failure in failures:
+                if isinstance(failure, int):
+                    failure_atts.append(self.model.nodes[failure][BUS_TYPE])
+                else:
+                    failure_atts.append(self.model.edges[failure][EDGE_TYPE])
+            return failure, order, failure_atts
 
     def treat_failures(self, failures) -> tuple:
         failures = [fail for fail in failures if fail is not None]
-        return failures, len(failures)
+        return failures
