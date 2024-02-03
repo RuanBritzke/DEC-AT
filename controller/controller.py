@@ -138,26 +138,24 @@ class Controller:
         else:
             raise ValueError(f"Origin value: {repr(origin)} isn't expected")
         df = self.view_table(df)
+
         for row in df.itertuples():
             maxorder = (
                 len(row[1:]) - 2
             ) / 2  # SE BARRA ORDEM (FALHA_i -> n) (FALHA i -> n)
             index = row[0]
-            failures = self.treat_failures(row[3 : int(3 + maxorder)])
+            failures, _ = self.treat_failures(row[3 : int(3 + maxorder)])
             U = self.model.unavailability(failures)
             df.at[index, "U"] = U
+
         df = df.loc[df["U"] != 0]
+        df = df.reset_index()
+        df = df[df.columns[1:]]
+
         self.view_tab_collection[origin] = df
         self.view.output.add_table(title=f"{origin}", view_table=df)
 
     def view_table(self, view_table: pd.DataFrame):
-        """_summary_
-        Args:
-            view_table (pd.DataFrame): _description_
-
-        Returns:
-            view_table: pd.DataFrame
-        """
         for col in view_table.columns[3:]:  # iterate over all failure columns
             new_col = " ".join(col.split("_"))
 
@@ -175,6 +173,8 @@ class Controller:
         failures: Iterable,
         group_consumers: int,
         hit_consumers: int,
+        avg_load: float = 0,
+        max_load: float = 0,
         ma: float = 0,
         mc: float = 0,
         md: float = 0,
@@ -195,23 +195,7 @@ class Controller:
 
         df: pd.DataFrame = self.view_tab_collection[entry]
 
-        self.calculate_chi(
-            df,
-            entry=entry,
-            index=index,
-            failures=failures,
-            hit_consumers=hit_consumers,
-            ma=ma,
-            mc=mc,
-            md=md,
-            ta=ta,
-            tc=tc,
-        )
-
-        self.calculate_dec(
-            df,
-            entry=entry,
-            index=index,
+        dec = self.model.calculate_dec(
             failures=failures,
             group_consumers=group_consumers,
             hit_consumers=hit_consumers,
@@ -221,52 +205,46 @@ class Controller:
             ta=ta,
             tc=tc,
         )
-
-        self.calculate_fic(
-            df,
-            entry=entry,
-            index=index,
-            failures=failures,
-            hit_consumers=hit_consumers,
-            md=md,
-        )
-
-        self.calculate_fec(
-            df,
-            entry=entry,
-            index=index,
+        fec = self.model.calculate_fec(
             failures=failures,
             group_consumers=group_consumers,
             hit_consumers=hit_consumers,
             md=md,
         )
+        df.at[index, "DEC"] = dec
 
-    def calculate_chi(
-        self, df: pd.DataFrame, *, entry: str, index: int, **kwargs: dict
-    ):
-        df.at[index, "CHI"] = self.model.calculate_chi(**kwargs)
-        self.view.output.update_table(self.view.output.tab_collection[entry][1], df)
+        df.at[index, "FEC"] = fec
 
-    def calculate_dec(
-        self, df: pd.DataFrame, *, entry: str, index: int, **kwargs: dict
-    ):
-        df.at[index, "DEC"] = self.model.calculate_dec(**kwargs)
-        self.view.output.update_table(self.view.output.tab_collection[entry][1], df)
+        df.at[index, "EMND MÉDIA"], df.at[index, "EMND MÁXIMA"] = (
+            self.model.calculate_ens(dec=dec, avg_load=avg_load, max_load=max_load)
+        )
 
-    def calculate_fic(
-        self, df: pd.DataFrame, *, entry: str, index: int, **kwargs: dict
-    ):
-        df.at[index, "FIC"] = self.model.calculate_fic(**kwargs)
-        self.view.output.update_table(self.view.output.tab_collection[entry][1], df)
-
-    def calculate_fec(
-        self, df: pd.DataFrame, *, entry: str, index: int, **kwargs: dict
-    ):
-        df.at[index, "FEC"] = self.model.calculate_fec(**kwargs)
         self.view.output.update_table(self.view.output.tab_collection[entry][1], df)
 
     def del_tab(self, entry):
         del self.view_tab_collection[entry]
+
+    def get_failure_atts(self, entry, index):
+        df: pd.DataFrame = self.view_tab_collection[entry]
+        failures_columns = [col for col in df.columns.to_list() if "_FALHA" in col]
+        failures = df[failures_columns].iloc[index].to_list()
+        failures, order = self.treat_failures(failures)
+        if order == 1:
+            if isinstance(failures[0], int):
+                return failures, order, self.model.nodes[failures[0]][BUS_TYPE]
+            return failures, order, self.model.edges[failures[0]][EDGE_TYPE]
+        if order == 2:
+            failure_atts = list()
+            for failure in failures:
+                if isinstance(failure, int):
+                    failure_atts.append(self.model.nodes[failure][BUS_TYPE])
+                else:
+                    failure_atts.append(self.model.edges[failure][EDGE_TYPE])
+            return failures, order, failure_atts
+
+    def treat_failures(self, failures) -> tuple:
+        failures = [fail for fail in failures if fail is not None]
+        return failures, len(failures)
 
     # def separete_failures(self, entry, index, order):
     #     new_df: pd.DataFrame = self.view_tab_collection[entry].copy()
@@ -302,28 +280,3 @@ class Controller:
     #     self.view.output.update_table(self.view.output.tab_collection[entry][1], new_df)
     #     self.view.output
     #     return
-
-    def get_failure_atts(self, entry, index):
-        df: pd.DataFrame = self.view_tab_collection[entry]
-        failures_columns = [col for col in df.columns.to_list() if "_FALHA" in col]
-        failures = df[failures_columns].iloc[index].to_list()
-        failures, order = self.treat_failures(failures)
-        if order == 1:
-            failure = failures[0]
-            if isinstance(failure, int):
-                return failures, order, self.model.nodes[failure][BUS_TYPE]
-            return failures, order, self.model.edges[failure][EDGE_TYPE]
-        if order == 2:
-            failure_atts = list()
-            edge1 = failures[0]
-            edge2 = failures[1]
-            for failure in failures:
-                if isinstance(failure, int):
-                    failure_atts.append(self.model.nodes[failure][BUS_TYPE])
-                else:
-                    failure_atts.append(self.model.edges[failure][EDGE_TYPE])
-            return failure, order, failure_atts
-
-    def treat_failures(self, failures) -> tuple:
-        failures = [fail for fail in failures if fail is not None]
-        return failures

@@ -243,14 +243,13 @@ class FailureTreatmentFrame(tk.Frame):
 
     def create_widgets(self):
         self.create_consumer_units_in_set_frame()
+        self.create_demand_unput_in_set_frame()
         self.create_failure_selection_frame()
-        self.create_parameters_input_frame(order=None, failure_type=None)
         return self
 
     def create_consumer_units_in_set_frame(self):
         consumer_units_in_set_frame = tk.Frame(self)
         consumer_units_in_set_frame.pack(anchor="nw", fill="x", expand="True")
-
         self.consumer_units_in_set_form = Form(
             consumer_units_in_set_frame,
             {
@@ -260,11 +259,22 @@ class FailureTreatmentFrame(tk.Frame):
         )
         self.consumer_units_in_set_form.pack(anchor="nw", fill="x", expand="True")
         return self
+    
+    def create_demand_unput_in_set_frame(self):
+        demand_in_set_frame = tk.Frame(self)
+        demand_in_set_frame.pack(anchor="nw", fill="x", expand="True")
+        self.demand_in_set_frame_form = Form(
+            demand_in_set_frame, 
+            {
+                "avg_load" : "Demanda Média do Ponto de Carga",
+                "max_load" : "Demanda Máxima do Ponto de Carga"
+            }
+        )
+        self.demand_in_set_frame_form.pack(anchor="nw", fill="x", expand="True")
+
 
     def create_failure_selection_frame(self):
-        failure_selection_frame = tk.Frame(
-            self,
-        )
+        failure_selection_frame = tk.Frame(self)
         failure_selection_frame.columnconfigure(0, weight=8, minsize=80)
         failure_selection_frame.columnconfigure(1, weight=1, minsize=35)
         failure_selection_frame.pack(anchor="nw", fill="x", expand=True)
@@ -301,12 +311,11 @@ class FailureTreatmentFrame(tk.Frame):
         )
 
     def failure_selected(self, *args):
-        self.parameters_input_frame.destroy()
         index = self.failure_selection_cbox.current()
-        self.arguments["index"] = index
         failures, order, failure_type = self.controller.get_failure_atts(
             self.title, index
         )
+        self.arguments["index"] = index
         self.arguments["failures"] = failures
         self.create_parameters_input_frame(order, failure_type)
 
@@ -367,7 +376,6 @@ class FailureTreatmentFrame(tk.Frame):
     #         len(self.arguments["failures"]),
     #     )
 
-    # Seletor de topologia de transformador
     def create_xfmr_topology_frame(self, master):
         xfmr_topology_frame = tk.Frame(master)
         xfmr_topology_frame.columnconfigure(0, weight=8, minsize=80)
@@ -403,6 +411,22 @@ class FailureTreatmentFrame(tk.Frame):
         )
         return
 
+    failure_types = {
+        DLIN: [1, ("md", "ma", "ta")],
+        0: [1, ("md", "ma", "ta")],  # 0 = A : beta = 1
+        1: [2, ("md", "ma", "ta", "mc", "tc")],  # 1 = B : beta = 2
+        2: [2, ("md", "ma", "ta", "mc", "tc")],  # 2 = C : beta = 2
+        3: [1, ("md", "ma", "ta")],  # 3 = D : beta = 1
+    }
+
+    param_prompt_dict = {
+        "md": "Percentual de consumidores transferíveis instantaneamente para outro(a) transformador/linha (DJ via AT), ou por TA (via MT) [%]",
+        "ma": "Percentual de consumidores transferíveis manualmente via alimentadores MT de outras subestações via chaveamento [%]",
+        "ta": "Tempo de acionamento manual da(s) chave(s) para transferir a carga para alimentadores de outras subestações [h]",
+        "mc": "Percentual de consumidores transferíveis manualmente para outro transformador da mesma subestação via chaveamento [%]",
+        "tc": "Tempo de acionamento manual da(s) chave(s) para isolar o defeito e transferir a carga entre transformadores da mesma subestação [h]",
+    }
+
     # Construtor de formulário
     def topology_selected(
         self, *, master: tk.Frame | None = None, failure_type: str | None = None
@@ -410,8 +434,8 @@ class FailureTreatmentFrame(tk.Frame):
         if hasattr(self, "formulary") and self.formulary.container.winfo_exists():
             self.formulary.destroy()
         if (
-            hasattr(self, "calculate_dec_button")
-            and self.calculate_dec_button.winfo_exists()
+            hasattr(self, "calculate_button")
+            and self.calculate_button.winfo_exists()
         ):
             self.calculate_dec_button.destroy()
 
@@ -424,30 +448,15 @@ class FailureTreatmentFrame(tk.Frame):
         self.formulary = Form(master, prompts)
         self.formulary.pack(side="top", anchor="nw", fill="x", expand="true")
 
-        self.calculate_dec_button = tk.Button(
-            master, text="Calcular DEC", command=self.send_params
+        self.calculate_button = tk.Button(
+            master, text="Calcular Parametros", command=self.send_params
         )
-        self.calculate_dec_button.pack(side="bottom", anchor="se", padx=5)
+        self.calculate_button.pack(side="bottom", anchor="se", padx=5)
         return
 
     def send_params(self):
         self.arguments.update(self.consumer_units_in_set_form.get_entry_values())
+        self.arguments.update(self.demand_in_set_frame_form.get_entry_values())
         self.arguments.update(self.formulary.get_entry_values())
         self.controller.calculate_params(**self.arguments)
         return
-
-    failure_types = {
-        DLIN: [1, ("md", "ma", "ta")],
-        0: [1, ("md", "ma", "ta")],  # 0 = A : beta = 1
-        1: [2, ("md", "ma", "ta", "mc", "tc")],  # 1 = B : beta = 2
-        2: [2, ("md", "ma", "ta", "mc", "tc")],  # 2 = C : beta = 2
-        3: [1, ("md", "ma", "ta")],  # 3 = D : beta = 1
-    }
-
-    param_prompt_dict = {
-        "md": "Percentual de consumidores transferíveis instantaneamente para outro(a) transformador/linha (DJ via AT), ou por TA (via MT) [%]",
-        "ma": "Percentual de consumidores transferíveis via alimentadores MT de outras subestações por chave manual [%]",
-        "ta": "Tempo de acionamento manual da(s) chave(s) para transferir a carga para alimentadores de outras subestações [h]",
-        "mc": "Percentual de consumidores transferíveis via chave manual para outro transformador da mesma subestação [%]",
-        "tc": "Tempo de acionamento manual da(s) chave(s) para isolar o defeito e transferir a carga entre transformadores da mesma subestação [h]",
-    }

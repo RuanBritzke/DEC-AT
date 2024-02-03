@@ -230,7 +230,7 @@ class Model(nx.MultiGraph):
             )
             voltage = "/".join([str(int(voltage)) for voltage in hv_lv])
 
-            name = f"TR {new_model.nodes[destiny][SUB]} {voltage} ({circuit})"
+            name = f"TR {new_model.nodes[origin][SUB]} {voltage} ({circuit})"
             (
                 permanent_failure_rate,
                 rp,
@@ -506,7 +506,9 @@ class Model(nx.MultiGraph):
                 return self.edge_data[(v, u, k)][param]
         return self.edges[element][param]
 
-    def get_element_stochastic_params(self, failures: Iterable[int | tuple]) -> tuple:
+    def get_element_stochastic_params(
+        self, failures: Iterable[int | tuple]
+    ) -> list[StochasticParams]:
         stochastic_params_list = list()
         for failure in failures:
             stochastic_params = StochasticParams(
@@ -519,177 +521,149 @@ class Model(nx.MultiGraph):
         return stochastic_params_list
 
     def unavailability(self, failures) -> float:
+        ic(failures)
         if len(failures) == 1:
-            return self.unavailability_p(failures[0]) + self.unavailability_t(
-                failures[0]
+            frp, rp, frt, rt = ic(self.get_element_stochastic_params(failures))
+            return ic(self.unavailability_p(frp, rp) + self.unavailability_t(frt, rt))
+        frp1, rp1, frt1, rt1, frp2, rp2, frt2, rt2 = ic(
+            self.get_element_stochastic_params(failures)
+        )
+        return ic(
+            self.overlaping_unavailabilty_pp((frp1, rp1), (frp2, rp2))
+            + self.overlaping_unavailabilty_pt(
+                (frp1, frt1, rp1, rt1), (frp2, frt2, rp2, rt2)
             )
-        return self.overlaping_unavailabilty_pp(
-            failures
-        ) + self.overlaping_unavailabilty_pt(failures)
+        )
 
-    def unavailability_p(self, failure) -> float:
-        """Calculate the permanent unavailability caused by a permanten failure on a component of the grid.
-
-        Args:
-            failure (int | tuple): element of the grid, that failed
-
-        Returns:
-            float: resulting unavailabilty due to permanent failure.
-        """
-        permanent_failure_rate = self.get_element_stochastic_param(failure, FR_P)
-        repair_time = self.get_element_stochastic_param(failure, RP)
+    def unavailability_p(self, permanent_failure_rate, repair_time) -> float:
         return permanent_failure_rate * repair_time
 
-    def unavailability_t(self, failure) -> float:
-        """Calculate the unavailability due to the failure of a a single component of the grid due to
+    def unavailability_t(self, temporary_failure_rate, repair_time) -> float:
+        return temporary_failure_rate * repair_time
 
-        Args:
-            failure (int | tuple): element of the grid, that failed
+    def overlaping_unavailabilty_pp(
+        self, failure_1_params: tuple, failure_2_params: tuple
+    ) -> float:
+        frp1, rp1 = failure_1_params
+        frp2, rp2 = failure_2_params
+        return frp1 * rp1 * frp2 * rp2 / 8760
 
-        Returns:
-            float: resulting unavailabilty due to permanent failure.
-        """
-        frt = self.get_element_stochastic_param(failure, FR_T)
-        rt = self.get_element_stochastic_param(failure, RT)
-        return frt * rt
+    def overlaping_unavailabilty_pt(
+        self, failure_1_params: tuple, failure_2_params: tuple
+    ) -> float:
+        frp1, frt1, rp1, rt1 = failure_1_params
+        frp2, frt2, rp2, rt2 = failure_2_params
 
-    def overlaping_unavailabilty_pp(self, failures) -> float:
-        """Calculate the overlaping unavailability of two components failing permanently at the same occurrance.
+        return (frp1 * rp1 * frt2 * rt2 + frp2 * rp2 * frt1 * rt1) / 8760
 
-        Args:
-            failrues (list): list of failures
+    def calculate_dec(
+        self,
+        *,
+        group_consumers: int,
+        hit_consumers: int,
+        failures: Iterable,
+        ma: float = 0,
+        mc: float = 0,
+        md: float = 0,
+        ta: float = 0,
+        tc: float = 0,
+        **kwargs,
+    ) -> float:
+        ic(failures)
+        if len(failures) == 1:  # falhas de primeira ordem
+            failure = failures[0]
+            frp = self.get_element_stochastic_param(failure, FR_P)
+            frt = self.get_element_stochastic_param(failure, FR_T)
+            rp = self.get_element_stochastic_param(failure, RP)
+            rt = self.get_element_stochastic_param(failure, RT)
 
-        Returns:
-            float: resulting unavailability due to failure.
-        """
-        frp = list()
-        rp = list()
-        for failure in failures:
-            frp.append(self.get_element_stochastic_param(failure, FR_P))
-            rp.append(self.get_element_stochastic_param(failure, RP))
-        return prod(frp) * prod(rp) / 8760
+            Up = (
+                frp * rp * (1 - md)
+            )  # valor base para falhas permanentes com transferencias automáticas
+            Ut = (
+                frt * rt * (1 - md)
+            )  # valor base para falhas temporárias com transferencias automáticas
 
-    def overlaping_unavailabilty_pt(self, failures) -> float:
-        """Calculate the overlaping unavailability of a permanent failure overlap a temporary failure.
+            if ta < rp:
+                Upa = -(frp * rp * ma) + (
+                    frp * ma * ta
+                )  # reudução da indisponibilidade da falha permanente
+                Up += Upa  # pela trasnferencia manual MT
 
-        Args:
-            failrues (list): list of failures
+            if ta < rt:
+                Uta = -(frt * rt * ma) + (
+                    frt * ma * ta
+                )  # reudução da indisponibilidade falha permanente
+                Ut += Uta  # pela transferencia manual MT
 
-        Returns:
-            float: resulting unavailability due to failure.
-        """
-        frp = list()
-        rp = list()
-        frt = list()
-        rt = list()
-        for failure in failures:
-            frp.append(self.get_element_stochastic_param(failure, FR_P))
-            rp.append(self.get_element_stochastic_param(failure, RP))
-            frt.append(self.get_element_stochastic_param(failure, FR_T))
-            rt.append(self.get_element_stochastic_param(failure, RT))
+            if tc < rp:
+                Upc = -(frp * rp * mc) + (
+                    frp * mc * tc
+                )  # reudução dc indisponibilidcde dc fclhc permcnente
+                Up += Upc  # pelc trcsnferencic mcnucl MT
 
-        return (frp[0] * frt[1] * rp[0] * rt[1] + frp[1] * frt[0] * rp[1] * rt[0]) / 8760
+            if tc < rt:
+                Utc = -(frt * rt * mc) + (
+                    frt * mc * tc
+                )  # reudução dc indisponibilidcde fclhc permcnente
+                Ut += Utc
 
+            return hit_consumers * (Up + Ut) / group_consumers
+        if len(failures) == 2:
+            frp1, rp1, frt1, rt1, frp2, rp2, frt2, rt2 = (
+                self.get_element_stochastic_params(failures)
+            )
 
-#   def adjusted_unavailability(
-#     self,
-#     *,
-#     failures: Iterable,
-#     beta=1,
-#     ma: float = 0,
-#     mc: float = 0,
-#     md: float = 0,
-#     ta: float = 0,
-#     tc: float = 0,
-# ):
-#     order = len(failures)
-#     if order == 1:
-#         (
-#             permanent_failure_rate,
-#             temporary_failure_rate,
-#             RP,
-#             repair_time,
-#         ) = self.get_element_stochastic_params(failures)
-#         unavailability_time = (
-#             beta * permanent_failure_rate * RP
-#             + beta * temporary_failure_rate * repair_time
-#         ) * (1 - ma - mc - md) + (
-#             permanent_failure_rate + temporary_failure_rate
-#         ) * (
-#             ta * ma + tc * mc
-#         )
-#         return unavailability_time
+            Upp = self.overlaping_unavailabilty_pp((frp1, rp1), (frp2, rp2)) * (1 - md)
 
-#     elif order == 2:
-#         (
-#             permanent_failure_rate_1,
-#             temporary_failure_rate_1,
-#             R_1,
-#             repair_time_1,
-#             permanent_failure_rate_2,
-#             temporary_failure_rate_2,
-#             R_2,
-#             repair_time_2,
-#         ) = self.get_element_stochastic_params(failures)
-#         unavailability_time = (
-#             (
-#                 beta
-#                 * permanent_failure_rate_1
-#                 * temporary_failure_rate_2
-#                 * R_1
-#                 * repair_time_2
-#                 + beta
-#                 * permanent_failure_rate_2
-#                 * temporary_failure_rate_1
-#                 * R_2
-#                 * repair_time_1
-#             )
-#             * (1 - ma - mc - md)
-#             + (permanent_failure_rate_1 * permanent_failure_rate_2)
-#             * (ma + mc)
-#             * (ta + tc) ** 2
-#         ) / 8760
-#         return unavailability_time
+            if ta < rp1 and ta < rp2:
+                Uppa = (
+                    -(frp1 * frp2 * rp1 * rp2 * ma) + (frp1 * frp2 * ma * ta)
+                ) / 8760  # reudução da indisponibilidade da falha permanente
+                Upp += Uppa  # pela trasnferencia manual MT
 
-# def calculate_chi(
-#     self,
-#     *,
-#     hit_consumers: int,
-#     failures: Iterable,
-#     beta=1,
-#     ma: float = 0,
-#     mc: float = 0,
-#     md: float = 0,
-#     ta: float = 0,
-#     tc: float = 0,
-# ):
-#     return hit_consumers * self.adjusted_unavailability(
-#         failures=failures, beta=beta, ma=ma, mc=mc, md=md, ta=ta, tc=tc
-#     )
+            if tc < rp1 and tc < rp2:
+                Uppc = (
+                    -(frp1 * frp2 * rp1 * rp2 * mc) + (frp1 * frp2 * mc * tc)
+                ) / 8760  # reudução dc indisponibilidcde dc fclhc permcnente
+                Upp += Uppc  # pelc trcsnferencic manual MT
 
-# def calculate_dec(
-#     self,
-#     *,
-#     group_consumers: int,
-#     hit_consumers: int,
-#     failures: Iterable,
-#     beta=1,
-#     ma: float = 0,
-#     mc: float = 0,
-#     md: float = 0,
-#     ta: float = 0,
-#     tc: float = 0,
-# ):
-#     return (
-#         self.calculate_chi(
-#             hit_consumers=hit_consumers,
-#             failures=failures,
-#             beta=beta,
-#             ma=ma,
-#             mc=mc,
-#             md=md,
-#             ta=ta,
-#             tc=tc,
-#         )
-#         / group_consumers
-#     )
+            Upt = (
+                ((frp1 * rp1 * frt2 * rt2) + (frp2 * rp2 * frt1 * rt1))
+                * (1 - md)
+                / 8760
+            )
+            # a redução para falhas
+            # permantnentes e temporaias
+            # combinadas
+            # não é facilmente obtida,
+            # pois existem dois tempos de
+            # reparo diferntes.
+            ic(Upp, Upt)
+            return (Upp + Upt) * hit_consumers / group_consumers
+        return 0
+
+    def calculate_fec(
+        self,
+        *,
+        failures: Iterable,
+        hit_consumers: int,
+        group_consumers: int,
+        md: float = 0,
+        **kwargs,
+    ):
+        if len(failures) == 1:
+            failure = failures[0]
+            frp = self.get_element_stochastic_param(failure, FR_P)
+            frt = self.get_element_stochastic_param(failure, FR_T)
+            return hit_consumers * (frp + frt) * (1 - md) / group_consumers
+        if len(failures) == 2:
+            frp1, rp1, frt1, rt1, frp2, rp2, frt2, rt2 = (
+                self.get_element_stochastic_params(failures)
+            )
+            fr_pp = frp1 * frp2 * (rp1 + rp2) * (1 - md) / 8760
+            fr_pt = (frt1 * frp2 * (rt1 + rp2) + frp1 * frt2 * (rp1 + rt2)) / 8760
+            return hit_consumers * (fr_pp + fr_pt) / group_consumers
+
+    def calculate_ens(self, *, dec, avg_load, max_load, **kwargs):
+        return dec * avg_load, dec * max_load
